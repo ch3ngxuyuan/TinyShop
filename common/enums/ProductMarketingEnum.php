@@ -14,8 +14,8 @@ use common\enums\BaseEnum;
 class ProductMarketingEnum extends BaseEnum
 {
     const GIVE_POINT = 'give_point';
-    const LADDER_PREFERENTIAL = 'ladder_preferential';
-    const DISCOUNT_PRODUCT = 'discount_product';
+    const COUPON = 'coupon';
+    const FULL_MAIL = 'full_mail';
 
     /**
      * @return array
@@ -24,8 +24,8 @@ class ProductMarketingEnum extends BaseEnum
     {
         return [
             self::GIVE_POINT => '赠送积分',
-            self::LADDER_PREFERENTIAL => '阶梯优惠',
-            self::DISCOUNT_PRODUCT => '限时折扣',
+            self::FULL_MAIL => '满额包邮',
+            self::COUPON => '优惠券',
         ];
     }
 }

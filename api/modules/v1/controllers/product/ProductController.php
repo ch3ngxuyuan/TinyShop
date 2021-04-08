@@ -2,15 +2,17 @@
 
 namespace addons\TinyShop\api\modules\v1\controllers\product;
 
-use addons\TinyShop\common\enums\PointExchangeTypeEnum;
 use Yii;
 use yii\data\ActiveDataProvider;
 use yii\helpers\Json;
 use common\helpers\ResultHelper;
 use common\enums\StatusEnum;
+use common\helpers\AddonHelper;
 use addons\TinyShop\common\models\product\Product;
 use api\controllers\OnAuthController;
 use addons\TinyShop\common\models\forms\ProductSearch;
+use addons\TinyShop\common\enums\PointExchangeTypeEnum;
+use addons\TinyShop\common\models\SettingForm;
 
 /**
  * 产品
@@ -58,12 +60,19 @@ class ProductController extends OnAuthController
 
         $model = Yii::$app->tinyShopService->product->findViewById($id, $member_id);
         if (!$model) {
-            return ResultHelper::json(422, '产品找不到了或者已下架');
+            return ResultHelper::json(422, '商品找不到了');
+        }
+
+        if (
+            $model['product_status'] == StatusEnum::DISABLED ||
+            $model['status'] == StatusEnum::DISABLED ||
+            $model['status'] == StatusEnum::DELETE
+        ) {
+            return ResultHelper::json(422, '商品已下架');
         }
 
         // 销量
-        $model['sales'] = $model['sales'] + $model['real_sales'];
-        unset($model['real_sales']);
+        unset($model['real_sales'], $model['sales']);
         // 标签
         $model['tags'] = !empty($model['tags']) ? explode(',', $model['tags']) : [];
         // 浏览量 + 1
@@ -86,8 +95,24 @@ class ProductController extends OnAuthController
             }
         }
 
+        // 查询开启分销 (非积分兑换才可以)
+        $model['commissionRate'] = [];
+        $setting = new SettingForm();
+        $setting->attributes = AddonHelper::getConfig();
+        if (
+            $setting->is_open_commission == StatusEnum::ENABLED &&
+            !PointExchangeTypeEnum::isIntegralBuy($model['point_exchange_type']) &&
+            $model['is_open_commission'] == StatusEnum::ENABLED
+        ) {
+            $model['commissionRate'] = Yii::$app->tinyShopService->productCommissionRate->findByProductId($model['id']);
+        }
+
+        // 营销
+        $model['marketing'] = [];
+        empty($model['marketing']) && $model['marketing_type']  = '';
+
         // 可领优惠券
-        $canReceiveCoupon = Yii::$app->tinyShopService->marketingCouponType->getCanReceiveCouponByProductId($id, $member_id);
+        $canReceiveCoupon = Yii::$app->tinyShopService->marketingCouponType->getCanReceiveCouponByProductId($id, $member_id, $model['merchant_id']);
         foreach ($canReceiveCoupon as &$item) {
             $item = Yii::$app->tinyShopService->marketingCouponType->regroupShow($item);
         }
@@ -95,7 +120,7 @@ class ProductController extends OnAuthController
         $model['canReceiveCoupon'] = $canReceiveCoupon;
 
         // 反转阶梯优惠，因为默认是递减
-        $model['ladderPreferential'] = array_reverse($model['ladderPreferential']);
+        $model['ladderPreferential'] = [];
 
         // 限购判断：是否可购买
         $model['is_buy'] = StatusEnum::ENABLED;
@@ -107,6 +132,19 @@ class ProductController extends OnAuthController
                 $model['is_buy'] = StatusEnum::DISABLED;
             }
         }
+
+        // 积分抵现
+        $model['pointConfig'] = Yii::$app->tinyShopService->marketingPointConfig->findOne($model['merchant_id']);
+        // 满包邮
+        $model['fullMail'] = Yii::$app->tinyShopService->marketingFullMail->findOne($model['merchant_id']);
+        // 满减送
+        $model['fullGive'] = [];
+        // 满减送规则
+        $model['fullGiveRule'] = [];
+        // 会员折扣
+        $model['memberDiscount'] = [];
+        // 组合套餐
+        $model['combination'] = [];
 
         return $model;
     }

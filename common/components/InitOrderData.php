@@ -7,7 +7,7 @@ use addons\TinyShop\common\enums\PreviewTypeEnum;
 use addons\TinyShop\common\models\forms\PreviewForm;
 use addons\TinyShop\common\components\purchase\CartPurchase;
 use addons\TinyShop\common\components\purchase\BuyNowPurchase;
-use addons\TinyShop\common\components\purchase\PresellBuyPurchase;
+use addons\TinyShop\common\components\purchase\PointExchangePurchase;
 
 /**
  * 初始化订单数据
@@ -19,11 +19,6 @@ use addons\TinyShop\common\components\purchase\PresellBuyPurchase;
 class InitOrderData
 {
     /**
-     * @var array
-     */
-    public $rule = [];
-
-    /**
      * 创建记录
      *
      * @var bool
@@ -31,12 +26,14 @@ class InitOrderData
     public $isNewRecord = false;
 
     /**
+     * 下单方式
+     *
      * @var array
      */
     protected $handlers = [
         PreviewTypeEnum::CART => CartPurchase::class, // 购物车
         PreviewTypeEnum::BUY_NOW => BuyNowPurchase::class, // 立即下单
-        PreviewTypeEnum::POINT_EXCHANGE => PresellBuyPurchase::class, // 积分
+        PreviewTypeEnum::POINT_EXCHANGE => PointExchangePurchase::class, // 积分
     ];
 
     /**
@@ -56,15 +53,13 @@ class InitOrderData
 
         /** @var InitOrderDataInterface $class */
         $class = new $this->handlers[$type]();
+        $class->isNewRecord = $this->isNewRecord;
         $previewForm = $class->execute($previewForm);
         if (!$previewForm->orderProducts || !$previewForm->sku) {
             throw new UnprocessableEntityHttpException('找不到可用的产品');
         }
 
-        // 触发后置行为
         $previewForm = $class->afterExecute($previewForm, $class::getType());
-        // 记录被触发的规则
-        $this->rule = $class->rule;
 
         return $previewForm;
     }

@@ -69,7 +69,7 @@ class CartItemService extends Service implements CartItemInterface
     /**
      * @param $sku_id
      * @param $member_id
-     * @return array|\yii\db\ActiveRecord|null
+     * @return array|\yii\db\ActiveRecord|null|CartItem
      */
     public function findBySukId($sku_id, $member_id)
     {
@@ -85,14 +85,30 @@ class CartItemService extends Service implements CartItemInterface
      */
     public function all($member_id)
     {
-        return $this->modelClass::find()
+        $member = Yii::$app->services->member->get($member_id);
+        $data = $this->modelClass::find()
             ->where(['member_id' => $member_id])
             ->andWhere(['>=', 'status', StatusEnum::DISABLED])
             ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
-            ->orderBy('status desc, updated_at desc')
-            ->with(['product', 'sku', 'ladderPreferential'])
+            ->orderBy('status desc, created_at asc')
+            ->with(['product', 'sku'])
             ->asArray()
             ->all();
+
+        foreach ($data as &$datum) {
+            $datum['remark'] = '';
+            if ($datum['status'] == StatusEnum::DISABLED) {
+                if ($datum['product']['stock'] <= 0) {
+                    $datum['remark'] = '库存不足';
+                }
+
+                if (!isset($datum['sku'])) {
+                    $datum['remark'] = '宝贝已不能购买';
+                }
+            }
+        }
+
+        return $data;
     }
 
     /**
@@ -105,8 +121,7 @@ class CartItemService extends Service implements CartItemInterface
     {
         return $this->modelClass::find()
             ->select('count(id)')
-            ->where(['member_id' => $member_id])
-            ->andWhere(['>=', 'status', StatusEnum::DISABLED])
+            ->where(['member_id' => $member_id, 'status' => StatusEnum::ENABLED])
             ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
             ->scalar();
     }
@@ -223,8 +238,7 @@ class CartItemService extends Service implements CartItemInterface
         $this->modelClass::deleteAll([
             'and',
             ['in', 'sku_id', $sku_ids],
-            ['member_id' => $member_id],
-            ['merchant_id' => Yii::$app->services->merchant->getId()]
+            ['member_id' => $member_id]
         ]);
 
         return true;
@@ -239,12 +253,9 @@ class CartItemService extends Service implements CartItemInterface
      */
     public function clear($member_id, $lose_status = false)
     {
-        $where = [
-            'member_id' => $member_id,
-            'merchant_id' => Yii::$app->services->merchant->getId()
-        ];
-
-        if ($lose_status == true) {
+        $where = [];
+        $where['member_id'] = $member_id;
+        if ($lose_status == StatusEnum::ENABLED) {
             $where['status'] = StatusEnum::DISABLED;
         }
 
@@ -272,12 +283,9 @@ class CartItemService extends Service implements CartItemInterface
      *
      * @param $product_id
      */
-    public function loseByProductId($product_id)
+    public function loseByProductIds(array $product_ids)
     {
-        $this->modelClass::updateAll(['status' => StatusEnum::DISABLED], [
-            'product_id' => $product_id,
-            'merchant_id' => Yii::$app->services->merchant->getId()
-        ]);
+        $this->modelClass::updateAll(['status' => StatusEnum::DISABLED], ['in', 'product_id', $product_ids]);
 
         // TODO 设置该产品订单为关闭
     }
@@ -308,7 +316,7 @@ class CartItemService extends Service implements CartItemInterface
             ->where(['in', 'id', $ids])
             ->andWhere(['status' => StatusEnum::ENABLED, 'member_id' => $member_id])
             ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
-            ->with(['product.ladderPreferential', 'product.myGet' => function(ActiveQuery $query) use ($member_id) {
+            ->with(['product.myGet' => function(ActiveQuery $query) use ($member_id) {
                 return $query->andWhere(['member_id' => $member_id]);
             }, 'sku'])
             ->asArray()

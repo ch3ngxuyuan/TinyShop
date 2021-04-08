@@ -2,16 +2,19 @@
 
 namespace addons\TinyShop\merchant\modules\order\controllers;
 
+use common\helpers\BcHelper;
 use Yii;
 use yii\data\Pagination;
 use yii\web\NotFoundHttpException;
 use common\enums\StatusEnum;
 use common\helpers\ResultHelper;
 use common\models\forms\CreditsLogForm;
+use common\enums\PayTypeEnum;
 use addons\TinyShop\common\models\order\Customer;
 use addons\TinyShop\common\models\forms\CustomerRefundForm;
 use addons\TinyShop\common\models\order\OrderProduct;
 use addons\TinyShop\merchant\controllers\BaseController;
+use addons\TinyShop\common\models\order\Order;
 
 /**
  * 售后
@@ -100,25 +103,48 @@ class CustomerController extends BaseController
     {
         /** @var OrderProduct $model */
         $model = $this->findRefundModel($id);
+        /** @var Order $order */
         $order = $model->order;
+        $refundTypes = [];
+        $refundTypes[PayTypeEnum::ON_LINE] = '线下';
+        $refundTypes[PayTypeEnum::USER_MONEY] = '余额';
+        $defaultRefundType = PayTypeEnum::ON_LINE;
+        // 线上支付
+        $thirdParty = PayTypeEnum::thirdParty();
+        if (in_array($order->payment_type, array_keys($thirdParty))) {
+            $refundTypes[$order->payment_type] = $thirdParty[$order->payment_type];
+        }
+
+        // 判断默认值
+        if (in_array($order->payment_type, array_keys($refundTypes))) {
+            $defaultRefundType = $order->payment_type;
+        }
 
         // 申请默认退款金额
-        $model->refund_balance_money = Yii::$app->tinyShopService->orderProduct->getRefundBalanceMoney($order, $model);
+        $refundBalanceMoney = Yii::$app->tinyShopService->orderProduct->getRefundBalanceMoney($order, $model);
+        $model->refund_balance_money = $refundBalanceMoney;
+        // 退款上限
+        $maxRefundMoney = BcHelper::sub($order->pay_money, $order->refund_money);
 
         if ($model->load(Yii::$app->request->post())) {
             // 开启事务
             $transaction = Yii::$app->db->beginTransaction();
             try {
                 // 退款进订单
-                $orderProduct = Yii::$app->tinyShopService->orderCustomer->refundReturnMoney($id, false);
-                // 退款进用户余额/原路退回
-                Yii::$app->services->memberCreditsLog->incrMoney(new CreditsLogForm([
-                    'member' => Yii::$app->services->member->get($model->member_id),
-                    'num' => $orderProduct->refund_balance_money,
-                    'credit_group' => 'orderRefundBalanceMoney',
-                    'map_id' => $orderProduct->id,
-                    'remark' => '订单售后退款',
-                ]));
+                $model->refund_balance_money > $maxRefundMoney && $model->refund_balance_money = $maxRefundMoney;
+                $orderProduct = Yii::$app->tinyShopService->orderCustomer->refundReturnMoney($id, $model->refund_balance_money);
+                if ($model->refund_type == PayTypeEnum::USER_MONEY) {
+                    // 退款进用户余额/原路退回
+                    Yii::$app->services->memberCreditsLog->incrMoney(new CreditsLogForm([
+                        'member' => Yii::$app->services->member->get($model->member_id),
+                        'num' => $orderProduct->refund_balance_money,
+                        'credit_group' => 'orderRefundBalanceMoney',
+                        'map_id' => $orderProduct->id,
+                        'remark' => Yii::$app->params['tinyShopName']  . '订单退款',
+                    ]));
+                } elseif (in_array($model->refund_type, array_keys($thirdParty))) {
+                    Yii::$app->services->pay->refund($model->refund_type, $orderProduct->refund_balance_money, $order->order_sn);
+                }
 
                 $transaction->commit();
 
@@ -126,13 +152,16 @@ class CustomerController extends BaseController
             } catch (\Exception $e) {
                 $transaction->rollBack();
 
-                return $this->message($e->getMessage(), Yii::$app->request->referrer, 'error');
+                return $this->message($e->getMessage(), $this->redirect(['index']), 'error');
             }
         }
 
         return $this->renderAjax('@addons/TinyShop/merchant/modules/order/views/product/refund-return-money', [
             'product' => $model,
             'order' => $order,
+            'refundTypes' => $refundTypes,
+            'maxRefundMoney' => $maxRefundMoney,
+            'defaultRefundType' => $defaultRefundType,
         ]);
     }
 
@@ -160,8 +189,11 @@ class CustomerController extends BaseController
      */
     public function actionRefundDetail($id)
     {
+        $model = Yii::$app->tinyShopService->orderCustomer->findById($id);
+
         return $this->render($this->action->id, [
-            'model' => Yii::$app->tinyShopService->orderCustomer->findById($id),
+            'model' => $model,
+            'orderRefund' => Yii::$app->tinyShopService->orderRefund->findByOrderProductId($model->order_product_id, StatusEnum::ENABLED),
         ]);
     }
 

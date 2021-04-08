@@ -31,7 +31,7 @@ class OrderCustomerController extends UserAuthController
      * @throws NotFoundHttpException
      * @throws \yii\web\UnprocessableEntityHttpException
      */
-    public function actionRefundApply()
+    public function actionApply()
     {
         $model = new CustomerRefundForm();
         $model->setScenario('apply');
@@ -40,7 +40,14 @@ class OrderCustomerController extends UserAuthController
             return ResultHelper::json(422, $this->getError($model));
         }
 
-        return Yii::$app->tinyShopService->orderCustomer->refundApply($model, Yii::$app->user->identity->member_id);
+        $product = Yii::$app->tinyShopService->orderProduct->findById($model->id);
+        empty($model->refund_require_money) && $model->refund_require_money = $product->product_money;
+        if ($model->refund_require_money > $product->product_money) {
+            $model->refund_require_money = $product->product_money;
+        }
+        $member = Yii::$app->services->member->get(Yii::$app->user->identity->member_id);
+
+        return Yii::$app->tinyShopService->orderCustomer->refundApply($model, $member->id, $member->nickname);
     }
 
     /**
@@ -51,7 +58,7 @@ class OrderCustomerController extends UserAuthController
      * @throws NotFoundHttpException
      * @throws \yii\web\UnprocessableEntityHttpException
      */
-    public function actionRefundSalesReturn()
+    public function actionSalesReturn()
     {
         $model = new CustomerRefundForm();
         $model->setScenario('salesReturn');
@@ -60,7 +67,9 @@ class OrderCustomerController extends UserAuthController
             return ResultHelper::json(422, $this->getError($model));
         }
 
-        return Yii::$app->tinyShopService->orderCustomer->refundSalesReturn($model, Yii::$app->user->identity->member_id);
+        $member = Yii::$app->services->member->get(Yii::$app->user->identity->member_id);
+
+        return Yii::$app->tinyShopService->orderCustomer->refundSalesReturn($model, $member->id, $member->nickname);
     }
 
     /**
@@ -70,7 +79,7 @@ class OrderCustomerController extends UserAuthController
      * @throws NotFoundHttpException
      * @throws \yii\web\UnprocessableEntityHttpException
      */
-    public function actionRefundClose()
+    public function actionClose()
     {
         $model = new CustomerRefundForm();
         $model->attributes = Yii::$app->request->post();
@@ -78,6 +87,8 @@ class OrderCustomerController extends UserAuthController
             return ResultHelper::json(422, $this->getError($model));
         }
 
-        return Yii::$app->tinyShopService->orderCustomer->refundClose($model->id, Yii::$app->user->identity->member_id);
+        $member = Yii::$app->services->member->get(Yii::$app->user->identity->member_id);
+
+        return Yii::$app->tinyShopService->orderCustomer->refundClose($model->id, $member->id, $member->nickname);
     }
 }

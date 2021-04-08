@@ -2,16 +2,15 @@
 
 use yii\widgets\ActiveForm;
 use common\helpers\Url;
-use yii\helpers\Url as BaseUrl;
-use common\helpers\Html;
 use common\widgets\webuploader\Files;
 use kartik\select2\Select2;
-use common\enums\WhetherEnum;
 use common\helpers\AddonHelper;
+use common\enums\StatusEnum;
 
 $this->title = $model->isNewRecord ? '创建' : '编辑';
 $this->params['breadcrumbs'][] = ['label' => '商品管理', 'url' => ['index']];
 $this->params['breadcrumbs'][] = $this->title;
+
 ?>
 
 <div class="row">
@@ -23,24 +22,41 @@ $this->params['breadcrumbs'][] = $this->title;
         <div class="nav-tabs-custom">
             <ul class="nav nav-tabs">
                 <li class="active"><a href="#tab_1" data-toggle="tab">基本</a></li>
-                <li><a href="#tab_2" data-toggle="tab">库存/规格</a></li>
-                <li><a href="#tab_3" data-toggle="tab">封面/详情</a></li>
-                <li><a href="#tab_4" data-toggle="tab">积分设置</a></li>
-                <li><a href="#tab_5" data-toggle="tab">阶梯优惠</a></li>
+                <li><a href="#tab_2" data-toggle="tab">库存规格</a></li>
+                <li><a href="#tab_3" data-toggle="tab">封面详情</a></li>
+                <li><a href="#tab_5" data-toggle="tab">积分设置</a></li>
             </ul>
             <div class="tab-content">
                 <div class="tab-pane active p-xs" id="tab_1">
                     <?= $form->field($model, 'name')->textInput(); ?>
                     <div class="row">
                         <div class="col-sm-4">
-                            <?= $form->field($model, 'cate_id')->dropDownList($cates, [
-                                'prompt' => '请选择',
-                            ]) ?></div>
+                            <?php  if ($setting->product_cate_type == 1) { ?>
+                                <?= $form->field($model, 'cate_id')->widget(\common\widgets\selectlinkage\Linkage::class, [
+                                    'url' => Url::to(['cate/select']),
+                                    'item' => $cate,
+                                    'allItem' => $cates,
+                                ]); ?>
+                            <?php } else { ?>
+                                <?= $form->field($model, 'cate_id')->widget(Select2::class, [
+                                    'data' => \common\helpers\ArrayHelper::map($cates, 'id', 'title'),
+                                    'options' => [
+                                        'placeholder' => '请选择分类',
+                                        'multiple' => true
+                                    ],
+                                    'maintainOrder' => true,
+                                    'pluginOptions' => [
+                                        'tags' => true,
+                                        'tokenSeparators' => [',', ' '],
+                                        'maximumInputLength' => 20
+                                    ],
+                                ])->hint('输入后请回车'); ?>
+                            <?php } ?>
+                        </div>
                         <div class="col-sm-4"><?= $form->field($model, 'brand_id')->dropDownList($brands, ['prompt' => '请选择']) ?></div>
                         <div class="col-sm-4"><?= $form->field($model, 'supplier_id')->dropDownList($supplier, ['prompt' => '请选择']) ?></div>
                     </div>
                     <?= $form->field($model, 'sketch')->textInput(); ?>
-                    <?= $form->field($model, 'sort')->textInput()->hint('数字越小，排名越靠前'); ?>
                     <?= $form->field($model, 'keywords')->textInput()->hint('商品关键字,能准确搜到商品的,比如 : 海尔电视,电视 之类的.用于 SEO 搜索'); ?>
                     <?= $form->field($model, 'tags')->widget(Select2::class, [
                         'data' => $tags,
@@ -60,8 +76,9 @@ $this->params['breadcrumbs'][] = $this->title;
                         'model' => $model,
                         'provincesName' => 'province_id',// 省字段名
                         'cityName' => 'city_id',// 市字段名
+                        'areaName' => 'area_id',// 区字段名
                         'template' => 'short', //合并为一行显示
-                        'level' => 2,
+                        'level' => 3,
                     ]); ?>
                     <?= $form->field($model, 'shipping_type')->radioList(['1' => '免邮','2' => '买家承担运费']); ?>
                     <div class="shipping <?php if ($model->shipping_type == 1){ echo 'hide'; } ?>">
@@ -81,6 +98,25 @@ $this->params['breadcrumbs'][] = $this->title;
                         <div class="col-sm-4"><?= $form->field($model, 'view')->textInput(); ?></div>
                         <div class="col-sm-4"><?= $form->field($model, 'transmit_num')->textInput(); ?></div>
                     </div>
+                    <div class="row">
+                        <div class="col-sm-6">
+                            <?= $form->field($model, 'production_date')->widget(kartik\date\DatePicker::class, [
+                                'language' => 'zh-CN',
+                                'layout'=>'{picker}{input}',
+                                'pluginOptions' => [
+                                    'format' => 'yyyy-mm-dd',
+                                    'todayHighlight' => true, // 今日高亮
+                                    'autoclose' => true, // 选择后自动关闭
+                                    'todayBtn' => true, // 今日按钮显示
+                                ],
+                                'options'=>[
+                                    'class' => 'form-control no_bor',
+                                    'value' => $model->isNewRecord ? date('Y-m-d') : date('Y-m-d',$model->production_date),
+                                ]
+                            ]);?>
+                        </div>
+                        <div class="col-sm-6"><?= $form->field($model, 'shelf_life')->textInput(); ?></div>
+                    </div>
                     <?= $form->field($model, 'is_hot')->checkbox(); ?>
                     <?= $form->field($model, 'is_recommend')->checkbox(); ?>
                     <?= $form->field($model, 'is_new')->checkbox(); ?>
@@ -88,92 +124,14 @@ $this->params['breadcrumbs'][] = $this->title;
                 </div>
                 <!-- /.tab-pane -->
                 <div class="tab-pane p-xs" id="tab_2">
-                    <div class="row">
-                        <div class="col-sm-6"><?= $form->field($model, 'marque')->textInput(); ?></div>
-                        <div class="col-sm-6"><?= $form->field($model, 'barcode')->textInput(); ?></div>
-                    </div>
-                    <div class="row">
-                        <div class="col-sm-6"><?= $form->field($model, 'stock')->textInput()->hint('商品的剩余数量, 如启用多规格，则此处设置无效.'); ?></div>
-                        <div class="col-sm-6"><?= $form->field($model, 'warning_stock')->textInput(); ?></div>
-                    </div>
-                    <?= $form->field($model, 'is_stock_visible')->radioList(WhetherEnum::getMap()) ?>
-                    <?= $form->field($model, 'is_attribute')->radioList(WhetherEnum::getMap())->hint('启用商品规格后，商品的价格及库存以商品规格为准,库存设置为0则会到”已售罄“中，不会显示'); ?>
-                    <div class="row base-attribute <?php if ($model->is_attribute == 1){ ?>hide<?php } ?>">
-                        <div class="col-sm-4"><?= $form->field($model, 'price')->textInput(); ?></div>
-                        <div class="col-sm-4"><?= $form->field($model, 'market_price')->textInput(); ?></div>
-                        <div class="col-sm-4"><?= $form->field($model, 'cost_price')->textInput(); ?></div>
-                    </div>
-                    <div class="attribute <?php if ($model->is_attribute == 0){ ?>hide<?php } ?>">
-                        <?= $form->field($model, 'base_attribute_id')->dropDownList(\common\helpers\ArrayHelper::merge(['0' => '请选择'], $baseAttribute)); ?>
-                        <dl class="control-group js-goods-attribute-block <?php if ($model->is_attribute == 0){ ?>hide<?php } ?>">
-                            <dt>商品属性</dt>
-                            <dd>
-                                <div class="controls">
-                                    <table class="table goods-sku-attribute js-goods-sku-attribute">
-                                        <?php foreach ($attributeValue as $value){ ?>
-                                            <tr>
-                                                <td><?= $value['title']; ?></td>
-                                                <td>
-                                                    <?php if($value['type'] == 1){ ?>
-                                                        <?= Html::textInput("attributeValue[" . $value['id'] . "]", $value['value'], [
-                                                                'class' => 'form-control'
-                                                        ])?>
-                                                    <?php }elseif($value['type'] == 2){ ?>
-                                                        <?= Html::radioList("attributeValue[" . $value['id'] . "]", $value['value'], $value['config'])?>
-                                                    <?php }elseif($value['type'] == 3){ ?>
-                                                        <?= Html::checkboxList("attributeValue[" . $value['id'] . "]", explode(',', $value['value']), $value['config'])?>
-                                                    <?php } ?>
-                                                </td>
-                                            </tr>
-                                        <?php } ?>
-                                    </table>
-                                </div>
-                            </dd>
-                        </dl>
-                        <dl class="control-group <?php if ($model->is_attribute == 0){ ?>hide<?php } ?>">
-                            <dt>商品规格</dt>
-                            <dd>
-                                <table class="table goods-sku js-goods-sku">
-                                    <tbody>
-                                    <?php foreach ($specValue as $spec){ ?>
-                                        <tr>
-                                            <td><?= $spec['title']; ?></td>
-                                            <td>
-                                                <?php foreach ($spec['value'] as $value){ ?>
-                                                    <span id="option-<?= $value['id']; ?>" data-type="<?= $spec['show_type']; ?>" class="btn btn-white btn-sm" data-id="<?= $value['id']; ?>" data-title="<?= $value['title']; ?>" data-pid="<?= $spec['id']; ?>" data-ptitle="<?= $spec['title']; ?>" data-sort="<?= $value['sort']; ?>"><?= $value['title']; ?></span>
-                                                    <?php if($spec['show_type'] == 2){ ?>
-                                                        <span class="btn btn-sm selectColor" style="background:<?= !empty($value['data']) ? '#' . $value['data'] : '#000000'; ?>;padding: 10px" data-href="<?= Url::to(['select-color', 'value' => $value['data']])?>"></span>
-                                                        <?= Html::hiddenInput('specValueFieldData[' . $value['id'] .']', '#' . $value['data'])?>
-                                                    <?php }elseif($spec['show_type'] == 3){ ?>
-                                                        <img src="<?= !empty($value['data']) ? $value['data'] : AddonHelper::file('img/sku-add.png'); ?>" class="selectImage" href="<?= BaseUrl::to(['/file/selector', 'boxId' => 'tinyshop', 'upload_type' => 'images'])?>" data-toggle='modal' data-target='#ajaxModalMax'>
-                                                        <?= Html::hiddenInput('specValueFieldData[' . $value['id'] .']', $value['data'])?>
-                                                    <?php } ?>
-                                                <?php } ?>
-                                            </td>
-                                        </tr>
-                                    <?php } ?>
-                                    </tbody>
-                                </table>
-                                <div class="hint-block">点击按钮进行规格值设置, 选择按钮的情况下颜色/图片选项规格值才会被保存</div>
-                            </dd>
-                        </dl>
-                        <dl class="js-spec-table hide">
-                            <dt class="m-b-sm">商品库存</dt>
-                            <dd>
-                                <div class="controls">
-                                    <div class="js-goods-stock control-group">
-                                        <div id="stock-region" class="sku-group">
-                                            <table class="table table-bordered table-sku-stock table-hover">
-                                                <thead></thead>
-                                                <tbody></tbody>
-                                                <tfoot></tfoot>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </div>
-                            </dd>
-                        </dl>
-                    </div>
+                    <?= $this->render('_specification', [
+                        'model' => $model,
+                        'form' => $form,
+                        'specValue' => $specValue,
+                        'attributeValue' => $attributeValue,
+                        'baseAttribute' => $baseAttribute,
+                    ]) ?>
+
                 </div>
                 <!-- /.tab-pane -->
                 <div class="tab-pane p-xs" id="tab_3">
@@ -203,7 +161,7 @@ $this->params['breadcrumbs'][] = $this->title;
                     <?= $form->field($model, 'intro')->widget(\common\widgets\ueditor\UEditor::class) ?>
                 </div>
                 <!-- /.tab-pane -->
-                <div class="tab-pane p-xs" id="tab_4">
+                <div class="tab-pane p-xs" id="tab_5">
                     <?= $form->field($model, 'point_exchange_type')->radioList(\addons\TinyShop\common\enums\PointExchangeTypeEnum::getMap()); ?>
                     <div class="shipping-point-for-now <?php if ($model->point_exchange_type != 1){ echo 'hide'; } ?>">
                         <?= $form->field($model, 'max_use_point')->textInput()->hint('设置购买时积分抵现最大可使用积分数，0为不可使用 '); ?>
@@ -214,41 +172,11 @@ $this->params['breadcrumbs'][] = $this->title;
                     <?= $form->field($model, 'integral_give_type')->radioList([0 => '赠送固定积分', 1 => '按照当前价格百分比赠送积分']); ?>
                     <?= $form->field($model, 'give_point')->textInput()->hint('最低为0，如果是百分比赠送积分上限为100 '); ?>
                 </div>
-                <div class="tab-pane p-xs" id="tab_5">
-                    <?= $form->field($model, 'ladderPreferentialData')->widget(unclead\multipleinput\MultipleInput::class, [
-                        'max' => 10,
-                        'min' => 0,
-                        'columns' => [
-                            [
-                                'name'  => 'quantity',
-                                'title' => '数量',
-                                'options' => [
-                                    'class' => 'input-priority'
-                                ]
-                            ],
-                            [
-                                'name'  => 'type',
-                                'type'  => 'dropDownList',
-                                'title' => '优惠类型',
-                                'defaultValue' => 1,
-                                'items' => [1 => '扣减']
-                            ],
-                            [
-                                'name'  => 'price',
-                                'title' => '金额',
-                                'options' => [
-                                    'class' => 'input-priority'
-                                ]
-                            ]
-                        ]
-                    ])->label('阶梯优惠')->hint('<span class="orange">设置商品阶梯优惠，当购买数量达到所设数量时，商品单价 = 商品销售价 - 优惠价格</span>');
-                    ?>
-                </div>
                 <div class="box-footer text-center">
                     <?= $form->field($model, 'id')->hiddenInput()->label(false); ?>
                     <div class="hide" id="specValue"></div>
                     <button class="btn btn-primary" type="button" onclick="beforSubmit()">保存</button>
-                    <span class="btn btn-white" onclick="history.go(-1)">返回</span>
+                    <span class="btn btn-white" onclick="rfTwiceAffirmBack(this, '确定返回吗？', '未保存的内容可能丢失');return false;">返回</span>
                 </div>
             </div>
             <!-- /.tab-content -->
@@ -257,115 +185,6 @@ $this->params['breadcrumbs'][] = $this->title;
         <!-- nav-tabs-custom -->
     </div>
 </div>
-
-<!-- 属性模板 -->
-<script id="attributeValue" type="text/html">
-    <tbody>
-    {{each attributeValue as value i}}
-    <tr>
-        <td>{{value.title}}</td>
-        <td>
-            {{if value.type == 1}}
-                <input type="text" value="{{value.value}}" class="form-control" name="attributeValue[{{value.id}}]">
-            {{else if value.type == 2}}
-            <div role="radiogroup">
-                {{each value.config as item i}}
-                    <label><input type="radio" name="attributeValue[{{value.id}}]" value="{{item}}" {{if i == 0}}checked="checked"{{/if}}> {{item}}</label>
-                {{/each}}
-            </div>
-            {{else}}
-                {{each value.config as item i}}
-                    <label><input type="checkbox" name="attributeValue[{{value.id}}][]" value="{{item}}"> {{item}}</label>
-                {{/each}}
-            {{/if}}
-        </td>
-    </tr>
-    {{/each}}
-    </tbody>
-</script>
-
-<!-- 规格模板 -->
-<script id="spec" type="text/html">
-    <tbody>
-    {{each spec as val i}}
-    <tr>
-        <td>{{val.title}}</td>
-        <td>
-            {{each val.value as item i}}
-                <span id="option-{{item.id}}" data-type="{{val.show_type}}" class="btn btn-white btn-sm" data-id="{{item.id}}" data-title="{{item.title}}" data-pid="{{val.id}}" data-ptitle="{{val.title}}" data-sort="{{item.sort}}">{{item.title}}</span>
-                {{if val.show_type == 2}}
-                    <span class="btn btn-sm selectColor" style="background:#000000;padding: 10px" href="<?= Url::to(['select-color'])?>" data-toggle="modal" data-target="#ajaxModal"></span>
-                    <?= Html::hiddenInput('specValueFieldData[{{item.id}}]', '')?>
-                {{else if val.show_type == 3}}
-                    <img src="<?= AddonHelper::file('img/sku-add.png'); ?>" class="selectImage" href="<?= BaseUrl::to(['/file/selector', 'boxId' => 'tinyshop', 'upload_type' => 'images'])?>" data-toggle='modal' data-target='#ajaxModalMax'>
-                    <?= Html::hiddenInput('specValueFieldData[{{item.id}}]', '')?>
-                {{/if}}
-            {{/each}}
-        </td>
-    </tr>
-    {{/each}}
-    </tbody>
-</script>
-
-<!-- 表格头 -->
-<script id="header" type="text/html">
-    <tr>
-        {{each data as value i}}
-        <th>{{value}}</th>
-        {{/each}}
-        <th class="th-picture">sku图片</th>
-        <th class="th-price">销售价（元）</th>
-        <th class="th-price">市场价（元）</th>
-        <th class="th-price">成本价（元）</th>
-        <th class="th-stock">库存</th>
-        <th class="th-code">商家编码</th>
-    </tr>
-</script>
-
-<!-- 表格内容 -->
-<script id="body" type="text/html">
-    {{each data as value i}}
-    <tr id="{{value.sku}}">
-        {{each value.child as item j}}
-            <td data-id="{{item.id}}">{{item.title}}</td>
-        {{/each}}
-        <td>
-            <img src="" class="selectImage" href="<?= BaseUrl::to(['/file/selector', 'boxId' => 'tinyshop', 'upload_type' => 'images'])?>" data-toggle="modal" data-target="#ajaxModalMax">
-            <input type="hidden" name="skus[{{value.sku}}][picture]" class="js-picture">
-        </td>
-        <td><input type="text" name="skus[{{value.sku}}][price]" class="js-price form-control" maxlength="10" value="0"></td>
-        <td><input type="text" name="skus[{{value.sku}}][market_price]" maxlength="10"  class="js-market-price form-control" value="0"></td>
-        <td><input type="text" name="skus[{{value.sku}}][cost_price]" maxlength="10" class="js-cost-price form-control" value="0"></td>
-        <td><input type="text" name="skus[{{value.sku}}][stock]" maxlength="10" class="js-stock-num form-control" value="0"></td>
-        <td><input type="text" name="skus[{{value.sku}}][code]" maxlength="10" class="js-code form-control" value="0"></td>
-    </tr>
-    {{/each}}
-</script>
-
-<!-- 表格底部 -->
-<script id="foot" type="text/html">
-    <tr>
-        <td>
-            批量设置：
-        </td>
-        <td colspan="{{colspan}}" style="text-align:left;">
-            <div class="batch-opts">
-                <span class="js-batch-type">
-                    <a class="js-batch-price blue" href="javascript:void (0);" onclick="batch(1)">销售价</a>
-                    <a class="js-batch-market_price blue" href="javascript:void (0);" onclick="batch(2)">市场价</a>
-                    <a class="js-batch-cost_price blue" href="javascript:void (0);" onclick="batch(3)">成本价</a>
-                    <a class="js-batch-stock blue" href="javascript:void (0);" onclick="batch(4)">库存</a>
-                    <a class="js-batch-merchant-code blue" href="javascript:void (0);" onclick="batch(5)">商家编码</a>
-                </span>
-                <span class="js-batch-form input-group hide">
-                    <input type="text" maxlength="11" class="js-batch-txt form-control input-sm" style="width:130px;">
-                    <a class="js-batch-save btn btn-primary btn-sm m-l-xs" href="javascript:void (0);">保存</a>
-                    <a class="js-batch-cancel btn btn-white btn-sm" href="javascript:void (0);">取消</a>
-                </span>
-            </div>
-        </td>
-    </tr>
-</script>
 
 <script>
     // 默认sku
@@ -380,6 +199,7 @@ $this->params['breadcrumbs'][] = $this->title;
     // sku值存储的数据
     var skusDataArr = [];
     var defaultAddImg = "<?= AddonHelper::file('img/sku-add.png') ?>";
+    var referrer = "<?= $referrer ?>";
 
     // 图片预览放大
     $(function() {
@@ -422,7 +242,7 @@ $this->params['breadcrumbs'][] = $this->title;
         });
 
         // 获取图片真实高度
-        function getImageWidth(url,callback){
+        function getImageWidth(url, callback){
             var img = new Image();
             img.src = url;
             // 如果图片被缓存，则直接返回缓存数据
@@ -435,12 +255,10 @@ $this->params['breadcrumbs'][] = $this->title;
             }
         }
     });
-
     // 初始化渲染
     $(document).ready(function () {
-        var base_attribute_id = $('#productform-base_attribute_id').val();
-
-        if (base_attribute_id > 0 || defaultSpecValue.length > 0) {
+        var is_attribute = $("input[name='ProductForm[is_attribute]']:checked").val();
+        if (is_attribute > 0) {
             // 禁用输入
             if($("#productform-stock").attr("readonly") != "readonly"){
                 $("#productform-stock").val(0).attr("readonly","readonly");
@@ -466,6 +284,7 @@ $this->params['breadcrumbs'][] = $this->title;
                 data['costPrice'] = defaultSku[i]['cost_price'];
                 data['stock'] = defaultSku[i]['stock'];
                 data['code'] = defaultSku[i]['code'];
+                data['status'] = defaultSku[i]['status'];
 
                 skusDataArr[skuId] = [];
                 skusDataArr[skuId] = data;
@@ -511,6 +330,7 @@ $this->params['breadcrumbs'][] = $this->title;
 
         // 设置规格属性
         var html = '';
+
         for (let i = 0; i < allData.length; i++) {
             var spec_id = allData[i]['id'];
 
@@ -539,9 +359,33 @@ $this->params['breadcrumbs'][] = $this->title;
             success: function(data) {
                 submitStatus = true;
                 if (parseInt(data.code) === 200) {
-                    swal("操作成功", "小手一抖就打开了一个框", "success").then((value) => {
-                        window.location = '<?= Url::to(['index']); ?>';
-                    });
+                    var editId = '<?= $model->id?>';
+                    if (editId) {
+                        swal("操作成功", "小手一抖就打开了一个框", "success").then((value) => {
+                            window.location = referrer;
+                        });
+                    } else {
+                        swal('小手一抖打开一个窗', {
+                            buttons: {
+                                defeat: '继续创建商品',
+                                catch: {
+                                    text: "完成",
+                                    value: "catch",
+                                },
+                            },
+                            title: '操作成功',
+                        }).then((value) => {
+                            switch (value) {
+                                case "defeat":
+                                    location.reload();
+                                    break;
+                                case "catch":
+                                    window.location = referrer;
+                                    break;
+                                default:
+                            }
+                        });
+                    }
                 } else {
                     rfWarning(data.message);
                 }
@@ -881,7 +725,7 @@ $this->params['breadcrumbs'][] = $this->title;
     // 创建表格底部
     function createTableFoot() {
         let data = [];
-        data['colspan']  = allData.length + 5;
+        data['colspan']  = allData.length + 6;
 
         let html = template('foot', data);
         $(".js-spec-table table tfoot").html(html);
@@ -899,6 +743,7 @@ $this->params['breadcrumbs'][] = $this->title;
             data['costPrice'] = $(this).find('.js-cost-price').val();
             data['stock'] = $(this).find('.js-stock-num').val();
             data['code'] = $(this).find('.js-code').val();
+            data['status'] = $(this).find('.js-status').val();
 
             skusDataArr[skuId] = [];
             skusDataArr[skuId] = data;
@@ -913,7 +758,7 @@ $this->params['breadcrumbs'][] = $this->title;
             let skuId = $(this).attr('id');
             if (skusDataArr.hasOwnProperty(skuId)) {
                 $(this).find('.js-picture').val(skusDataArr[skuId]['picture']);
-                if (skusDataArr[skuId]['picture']) {
+                if (skusDataArr[skuId]['picture'].length > 0) {
                     $(this).find('.selectImage').attr('src', skusDataArr[skuId]['picture']);
                 } else {
                     $(this).find('.selectImage').attr('src', defaultAddImg);
@@ -924,11 +769,13 @@ $this->params['breadcrumbs'][] = $this->title;
                 $(this).find('.js-cost-price').val(skusDataArr[skuId]['costPrice']);
                 $(this).find('.js-stock-num').val(skusDataArr[skuId]['stock']);
                 $(this).find('.js-code').val(skusDataArr[skuId]['code']);
+                $(this).find('.js-status').val(skusDataArr[skuId]['status']);
+            } else {
+                $(this).find('.selectImage').attr('src', defaultAddImg);
             }
         });
     }
 </script>
-
 
 <script>
     var colorUrl = "<?= Url::to(['select-color', 'value' => ''])?>";

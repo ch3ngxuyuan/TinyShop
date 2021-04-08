@@ -12,6 +12,8 @@ use addons\TinyShop\common\enums\RangeTypeEnum;
 use addons\TinyShop\common\models\marketing\CouponType;
 use addons\TinyShop\common\models\marketing\Coupon;
 use addons\TinyShop\merchant\forms\CouponTypeForm;
+use addons\TinyShop\common\enums\PreferentialTypeEnum;
+use addons\TinyShop\common\enums\SubscriptionActionEnum;
 
 /**
  * Class CouponService
@@ -186,6 +188,25 @@ class CouponService extends Service
     }
 
     /**
+     * 未付款关闭退回
+     *
+     * @param $id
+     * @param $member_id
+     */
+    public function back($id, $member_id)
+    {
+        Coupon::updateAll([
+            'use_order_id' => 0,
+            'use_time' => 0,
+            'state' => Coupon::STATE_GET,
+        ], [
+            'id' => $id,
+            'member_id' => $member_id,
+            'state' => Coupon::STATE_UNSED
+        ]);
+    }
+
+    /**
      * 创建优惠券
      *
      * @param CouponTypeForm $couponType
@@ -197,9 +218,10 @@ class CouponService extends Service
         $rows = [];
         for ($i = 0; $i < $count; $i++) {
             $code = time() . rand(10000, 99999);
+            $merchant_id = Yii::$app->services->merchant->getId();
             $rows[] = [
                 'coupon_type_id' => $couponType->id,
-                'merchant_id' => Yii::$app->services->merchant->getId(),
+                'merchant_id' => empty($merchant_id) ? 0 : $merchant_id,
                 'code' => $code,
             ];
         }

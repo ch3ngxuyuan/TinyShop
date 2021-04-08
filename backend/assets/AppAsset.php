@@ -15,13 +15,14 @@ class AppAsset extends AssetBundle
     /**
      * @var string
      */
-    public $sourcePath = '@addons/TinyShop/backend/resources/';
+    public $sourcePath = '@addons/TinyShop/merchant/resources/';
 
     public $css = [
         'css/tinyshop.css',
     ];
 
     public $js = [
+        'js/tinyshop.js',
     ];
 
     public $depends = [

@@ -14,6 +14,7 @@ use common\enums\BaseEnum;
 class OrderTypeEnum extends BaseEnum
 {
     const ORDINARY = 1;
+
     /**
      * @return array
      */

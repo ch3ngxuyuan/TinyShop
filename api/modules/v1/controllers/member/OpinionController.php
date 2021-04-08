@@ -9,6 +9,7 @@ use yii\data\ActiveDataProvider;
 use api\controllers\UserAuthController;
 use addons\TinyShop\common\models\common\Opinion;
 use common\enums\StatusEnum;
+use common\helpers\ResultHelper;
 
 /**
  * 意见反馈
@@ -41,6 +42,24 @@ class OpinionController extends UserAuthController
                 'validatePage' => false,// 超出分页不返回data
             ],
         ]);
+    }
+
+    /**
+     * @return array|mixed|\yii\db\ActiveRecord
+     */
+    public function actionCreate()
+    {
+        /* @var $model \yii\db\ActiveRecord */
+        $model = new $this->modelClass();
+        $model->attributes = Yii::$app->request->post();
+        $model->from = Yii::$app->user->identity->group;
+        $model->member_id = Yii::$app->user->identity->member_id;
+        $model->merchant_id = Yii::$app->user->identity->merchant_id;
+        if (!$model->save()) {
+            return ResultHelper::json(422, $this->getError($model));
+        }
+
+        return $model;
     }
 
     /**

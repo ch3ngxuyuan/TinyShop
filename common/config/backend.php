@@ -107,7 +107,7 @@ return [
         [
             'title' => '营销管理',
             'route' => 'marketing',
-            'icon' => 'fa fa-ticket',
+            'icon' => 'fa fa-gift',
             'child' => [
                 [
                     'title' => '优惠券',
@@ -120,6 +120,10 @@ return [
                 [
                     'title' => '满额包邮',
                     'route' => 'marketing/full-mail/index',
+                ],
+                [
+                    'title' => '小程序直播',
+                    'route' => 'marketing/mini-program-live/index',
                 ],
             ]
         ],
@@ -140,7 +144,7 @@ return [
         ],
         [
             'title' => '物流配送',
-            'route' => 'express-company/index',
+            'route' => 'base/express-company/index',
             'icon' => 'fa fa-truck',
         ],
         [
@@ -168,6 +172,14 @@ return [
                     'title' => '站点帮助',
                     'route' => 'common/helper/index',
                 ],
+                [
+                    'title' => '站点维护',
+                    'route' => 'common/maintenance/index',
+                ],
+                [
+                    'title' => '版权信息',
+                    'route' => 'common/copyright/index',
+                ],
             ]
         ],
         [
@@ -188,12 +200,8 @@ return [
                     'route' => 'statistics/product-hot/index',
                 ],
                 [
-                    'title' => '运营报告',
-                    'route' => 'statistics/sus-res/index',
-                ],
-                [
-                    'title' => '销售排行',
-                    'route' => 'statistics/sales-ranking/index',
+                    'title' => '交易分析',
+                    'route' => 'statistics/transaction-analyze/index',
                 ],
             ]
         ],

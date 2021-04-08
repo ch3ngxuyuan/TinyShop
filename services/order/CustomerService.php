@@ -2,7 +2,9 @@
 
 namespace addons\TinyShop\services\order;
 
+use addons\TinyShop\common\enums\SubscriptionActionEnum;
 use Yii;
+use yii\helpers\Json;
 use yii\web\UnprocessableEntityHttpException;
 use common\enums\StatusEnum;
 use common\helpers\ArrayHelper;
@@ -34,7 +36,7 @@ class CustomerService extends Service
      * @return Customer|void
      * @throws UnprocessableEntityHttpException
      */
-    public function refundApply(CustomerRefundForm $refundForm, $member_id)
+    public function refundApply(CustomerRefundForm $refundForm, $member_id, $nickname)
     {
         $orderProduct = Yii::$app->tinyShopService->orderProduct->findById($refundForm->id);
         if (!$orderProduct) {
@@ -51,7 +53,7 @@ class CustomerService extends Service
 
         /** @var Order $order */
         $order = $orderProduct->order;
-        $config = AddonHelper::getBackendConfig();
+        $config = AddonHelper::getConfig();
         $after_sale = $config['after_sale_date'] ?? '';
         if (!empty($after_sale) && ($order->finish_time + $after_sale * 60 * 60 * 24) < time()) {
             throw new UnprocessableEntityHttpException('可售后时间已过，不可申请');
@@ -74,11 +76,15 @@ class CustomerService extends Service
         } else {
             $model = new Customer();
             $model->attributes = ArrayHelper::toArray($orderProduct);
+            $model->merchant_id = $orderProduct['merchant_id'];
             $model->order_product_id = $orderProduct['id'];
         }
 
         $model->refund_type = $refundForm->refund_type;
         $model->refund_reason = $refundForm->refund_reason;
+        $model->refund_evidence = $refundForm->refund_evidence;
+        $model->refund_require_money = $refundForm->refund_require_money;
+        $model->refund_evidence = is_array($refundForm->refund_evidence) ? $refundForm->refund_evidence : Json::decode($refundForm->refund_evidence);
         $model->shipping_type = $order->shipping_type;
         $model->order_sn = $order->order_sn;
         $model->payment_type = $order->payment_type;
@@ -97,6 +103,17 @@ class CustomerService extends Service
 
         // 售后状态修改
         OrderProduct::updateAll(['is_customer' => StatusEnum::ENABLED], ['id' => $model->order_product_id]);
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->order_product_id,
+            $model->refund_status,
+            $member_id,
+            $nickname,
+            true
+        );
 
         return $model;
     }
@@ -122,6 +139,17 @@ class CustomerService extends Service
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
 
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->order_product_id,
+            $model->refund_status,
+            Yii::$app->user->identity->id,
+            Yii::$app->user->identity->username,
+            true
+        );
+
         return $model;
     }
 
@@ -146,6 +174,17 @@ class CustomerService extends Service
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
 
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->order_product_id,
+            $model->refund_status,
+            Yii::$app->user->identity->id,
+            Yii::$app->user->identity->username,
+            true
+        );
+
         return $model;
     }
 
@@ -156,7 +195,7 @@ class CustomerService extends Service
      * @param $member_id
      * @throws UnprocessableEntityHttpException
      */
-    public function refundSalesReturn($refundForm, $member_id)
+    public function refundSalesReturn($refundForm, $member_id, $nickname)
     {
         $model = $this->findByIdAndVerify($refundForm->id, $member_id);
         $model->refund_shipping_code = $refundForm->refund_shipping_code;
@@ -178,6 +217,17 @@ class CustomerService extends Service
         if (!$model->save()) {
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->order_product_id,
+            $model->refund_status,
+            $member_id,
+            $nickname,
+            true
+        );
     }
 
     /**
@@ -187,7 +237,7 @@ class CustomerService extends Service
      * @param $member_id
      * @throws UnprocessableEntityHttpException
      */
-    public function refundClose($id, $member_id)
+    public function refundClose($id, $member_id, $nickname)
     {
         $model = $this->findByIdAndVerify($id, $member_id);
 
@@ -203,6 +253,17 @@ class CustomerService extends Service
         if (!$model->save()) {
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->order_product_id,
+            $model->refund_status,
+            $member_id,
+            $nickname,
+            true
+        );
     }
 
     /**
@@ -213,7 +274,14 @@ class CustomerService extends Service
      */
     public function refundDelivery($id)
     {
-        $model = $this->findByIdAndVerify($id);
+        $model = Customer::find()
+            ->where(['id' => $id, 'status' => StatusEnum::ENABLED])
+            ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
+            ->one();
+
+        if (!$model) {
+            throw new UnprocessableEntityHttpException('申请售后记录不存在');
+        }
 
         if ($model->refund_status != RefundStatusEnum::AFFIRM_SALES_RETURN) {
             throw new UnprocessableEntityHttpException('确认收货失败，已经被处理');
@@ -235,7 +303,7 @@ class CustomerService extends Service
      * @throws UnprocessableEntityHttpException
      * @throws \yii\web\NotFoundHttpException
      */
-    public function refundReturnMoney($id)
+    public function refundReturnMoney($id, $refund_balance_money)
     {
         /** @var Customer $model */
         $model = $this->findById($id);
@@ -243,7 +311,7 @@ class CustomerService extends Service
         $order = $model->order;
 
         // 实际退款金额
-        $model->refund_balance_money = Yii::$app->tinyShopService->orderProduct->getRefundBalanceMoney($order, $model);
+        $model->refund_balance_money = $refund_balance_money;
 
         // 退款确认
         if ($model->refund_status != RefundStatusEnum::AFFIRM_RETURN_MONEY) {
@@ -255,8 +323,22 @@ class CustomerService extends Service
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
 
-        // 增加本身订单退款金额
-        Order::updateAllCounters(['refund_balance_money' => $model->refund_balance_money], ['id' => $order->id]);
+        // 退款为 0
+        if ($model->refund_balance_money > 0) {
+            // 增加本身订单退款金额
+            Order::updateAllCounters(['refund_balance_money' => $model->refund_balance_money], ['id' => $order->id]);
+        }
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->order_product_id,
+            $model->refund_status,
+            Yii::$app->user->identity->id,
+            Yii::$app->user->identity->username,
+            true
+        );
 
         return $model;
     }
@@ -289,6 +371,22 @@ class CustomerService extends Service
             ->andFilterWhere(['member_id' => $member_id])
             ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
             ->one();
+    }
+
+    /**
+     * @param $order_product_id
+     * @param $member_id
+     * @return array|\yii\db\ActiveRecord|null
+     */
+    public function findByOrderProductIds($order_product_ids, $member_id)
+    {
+        return Customer::find()
+            ->where(['status' => StatusEnum::ENABLED])
+            ->andWhere(['in', 'order_product_id', $order_product_ids])
+            ->andFilterWhere(['member_id' => $member_id])
+            ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
+            ->asArray()
+            ->all();
     }
 
     /**

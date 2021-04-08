@@ -23,7 +23,11 @@ $this->params['breadcrumbs'][] = $this->title;
                     'dataProvider' => $dataProvider,
                     'filterModel' => $searchModel,
                     //重新定义分页样式
-                    'tableOptions' => ['class' => 'table table-hover rf-table'],
+                    'tableOptions' => [
+                        'class' => 'table table-hover rf-table',
+                        'fixedNumber' => 2,
+                        'fixedRightNumber' => 1,
+                    ],
                     'options' => [
                         'id' => 'grid',
                     ],
@@ -39,7 +43,7 @@ $this->params['breadcrumbs'][] = $this->title;
                             'format' => 'raw',
                             'filter' => Html::activeDropDownList($searchModel, 'type', PreferentialTypeEnum::getMap(), [
                                     'prompt' => '全部',
-                                    'class' => 'form-control'
+                                    'class' => 'form-control',
                                 ]
                             ),
                             'value' => function ($model) {
@@ -51,7 +55,7 @@ $this->params['breadcrumbs'][] = $this->title;
                             'format' => 'raw',
                             'filter' => Html::activeDropDownList($searchModel, 'range_type', RangeTypeEnum::getMap(), [
                                     'prompt' => '全部',
-                                    'class' => 'form-control'
+                                    'class' => 'form-control',
                                 ]
                             ),
                             'value' => function ($model) {
@@ -112,22 +116,36 @@ $this->params['breadcrumbs'][] = $this->title;
                         ],
                         [
                             'attribute' => 'is_show',
+                            'filter' => Html::activeDropDownList($searchModel, 'is_show',
+                                \common\enums\WhetherEnum::getMap(), [
+                                    'prompt' => '全部',
+                                    'class' => 'form-control',
+                                ]
+                            ),
                             'value' => function ($model) {
                                 return Html::whether($model->is_show);
                             },
-                            'filter' => false,
                             'format' => 'raw',
                         ],
                         [
                             'header' => "操作",
                             'class' => 'yii\grid\ActionColumn',
-                            'template' => '{coupon} {edit} {status} {delete}',
+                            'template' => '{coupon} {give} {edit} {status} {delete}',
                             'buttons' => [
                                 'coupon' => function ($url, $model, $key) {
                                     return Html::linkButton([
                                         'coupon/index',
                                         'coupon_type_id' => $model['id'],
                                     ], '发放记录');
+                                },
+                                'give' => function ($url, $model, $key) {
+                                    return Html::linkButton([
+                                        'give',
+                                        'coupon_type_id' => $model['id'],
+                                    ], '赠送', [
+                                        'data-toggle' => 'modal',
+                                        'data-target' => '#ajaxModal',
+                                    ]);
                                 },
                                 'status' => function ($url, $model, $key) {
                                     return Html::status($model->status);

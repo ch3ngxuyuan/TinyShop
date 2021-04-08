@@ -2,6 +2,7 @@
 
 use yii\grid\GridView;
 use common\helpers\Html;
+use common\helpers\Url;
 use addons\TinyShop\common\enums\ExplainTypeEnum;
 use common\helpers\ImageHelper;
 
@@ -21,16 +22,31 @@ $this->params['breadcrumbs'][] = $this->title;
                     'dataProvider' => $dataProvider,
                     'filterModel' => $searchModel,
                     //重新定义分页样式
-                    'tableOptions' => ['class' => 'table table-hover'],
+                    'tableOptions' => [
+                        'class' => 'table table-hover rf-table',
+                        'fixedNumber' => 2,
+                        'fixedRightNumber' => 1,
+                    ],
                     'columns' => [
                         'id',
-                        'order_sn',
+                        [
+                            'attribute' => 'order_sn',
+                            'format' => 'raw',
+                            'value' => function ($model) {
+                                return '<span class="order-view pointer" data-href="' . Url::to(['/order/order/detail', 'id' => $model->order_id]) . '">' . $model->order_sn . '</span>';
+                            },
+                            'headerOptions' => ['class' => 'col-md-1'],
+                        ],
                         [
                             'attribute' => 'product_name',
                             'headerOptions' => ['class' => 'col-md-2'],
                         ],
                         [
                             'attribute' => 'member_nickname',
+                            'format' => 'raw',
+                            'value' => function ($model) {
+                                return '<span class="member-view pointer" data-href="' . Url::to(['/member/view', 'member_id' => $model->member_id]) . '">' . $model->member_nickname . '</span>';
+                            },
                             'headerOptions' => ['class' => 'col-md-1'],
                         ],
                         [
@@ -42,7 +58,7 @@ $this->params['breadcrumbs'][] = $this->title;
                                 $str = [];
                                 $str[] = ImageHelper::fancyBoxs($model->covers);
                                 $str[] = Html::encode($model->content);
-                                !empty($model->explain_first) && $str[] = '回复：' . $model->explain_first;
+                                !empty($model->explain_first) && $str[] = '回复：' . Html::encode($model->explain_first);
                                 $str[] = Yii::$app->formatter->asDatetime($model->created_at);
                                 $str[] = Html::a('回复', ['ajax-edit', 'id' => $model['id']], [
                                     'data-toggle' => 'modal',
@@ -63,8 +79,8 @@ $this->params['breadcrumbs'][] = $this->title;
                                 $str = [];
                                 if ($model->again_content) {
                                     $str[] = ImageHelper::fancyBoxs($model->again_covers);
-                                    $str[] = $model->again_content;
-                                    !empty($model->again_explain) && $str[] = '回复：' . $model->again_explain;
+                                    $str[] = Html::encode($model->again_content);
+                                    !empty($model->again_explain) && $str[] = '回复：' . Html::encode($model->again_explain);
                                     $str[] = Yii::$app->formatter->asDatetime($model->again_addtime);
                                     $str[] = Html::a('回复', ['ajax-edit', 'id' => $model['id'], 'type' => 'again'], [
                                         'data-toggle' => 'modal',

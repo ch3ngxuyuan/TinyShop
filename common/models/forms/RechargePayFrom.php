@@ -66,7 +66,25 @@ class RechargePayFrom extends Model implements PayHandler
      */
     public function getOrderSn(): string
     {
-        return StringHelper::randomNum(time());
+        return time() . StringHelper::random(8, true);
+    }
+
+    /**
+     * 交易流水号
+     *
+     * @return string
+     */
+    public function getOutTradeNo()
+    {
+        return '';
+    }
+
+    /**
+     * @return int
+     */
+    public function getMerchantId(): int
+    {
+        return 0;
     }
 
     /**

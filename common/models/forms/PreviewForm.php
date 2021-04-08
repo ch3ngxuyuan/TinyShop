@@ -2,18 +2,18 @@
 
 namespace addons\TinyShop\common\models\forms;
 
-use common\enums\StatusEnum;
 use Yii;
 use common\helpers\ArrayHelper;
 use common\models\member\Address;
 use common\models\member\Member;
+use addons\TinyShop\common\models\product\Product;
 use addons\TinyShop\common\models\marketing\Coupon;
 use addons\TinyShop\common\models\order\Order;
 use addons\TinyShop\common\models\pickup\Point;
 use addons\TinyShop\common\enums\PreviewTypeEnum;
 use addons\TinyShop\common\enums\ShippingTypeEnum;
 use addons\TinyShop\common\models\order\OrderProduct;
-use addons\TinyShop\common\enums\OrderTypeEnum;
+use addons\TinyShop\common\models\order\ProductMarketingDetail;
 
 /**
  * Class PreviewForm
@@ -41,7 +41,7 @@ class PreviewForm extends Order
     /**
      * 默认的系统产品
      *
-     * @var array
+     * @var Product|array
      */
     public $defaultProducts = [];
 
@@ -51,6 +51,13 @@ class PreviewForm extends Order
      * @var array|OrderProduct
      */
     public $orderProducts = [];
+
+    /**
+     * 生成的订单产品组别
+     *
+     * @var array|OrderProduct
+     */
+    public $groupOrderProducts = [];
 
     /**
      * sku数据
@@ -120,6 +127,9 @@ class PreviewForm extends Order
      */
     public $pickup_point_freight;
 
+    public $close_all_logistics;
+    public $is_open_logistics;
+
     /** ------------- 用户 ------------- */
 
     /**
@@ -182,6 +192,18 @@ class PreviewForm extends Order
      */
     public $max_use_point;
 
+    /** ------------- 包邮id ------------- */
+    /**
+     * @var array
+     */
+    public $fullProductIds = [];
+
+    /** ------------- 优惠记录 ------------- */
+    /**
+     * @var array|ProductMarketingDetail
+     */
+    public $marketingDetails = [];
+
     /** ------------- 优惠券 ------------- */
 
     /**
@@ -190,6 +212,97 @@ class PreviewForm extends Order
      * @var Coupon
      */
     public $coupon;
+
+    /** ------------- 拼团 ------------- */
+
+    /**
+     * 拼团产品id
+     *
+     * @var int
+     */
+    public $wholesale_product_id;
+
+    /**
+     * 拼团id
+     *
+     * @var int
+     */
+    public $wholesale_id;
+
+    /**
+     * @var WholesaleProduct
+     */
+    public $wholesale_product;
+
+    /** ------------- 团购下单 ------------- */
+    public $group_buy_id;
+
+    /**
+     * @var GroupBuy
+     */
+    public $group_buy;
+
+    /** ------------- 组合套餐 ------------- */
+    /**
+     * 套餐id
+     *
+     * @var int
+     */
+    public $combination_id;
+    /**
+     * 数量
+     *
+     * @var int
+     */
+    public $combination_num = 1;
+
+    /** ------------- 预约购买 ------------- */
+
+    /**
+     * @var
+     */
+    public $subscribe_buy_id;
+
+    /**
+     * 推广码
+     *
+     * @var
+     */
+    public $promo_code;
+
+    /**
+     * 全款预订
+     *
+     * @var int
+     */
+    public $is_full_payment = 0;
+    public $final_payment_money;
+    /**
+     * 全款
+     *
+     * @var int
+     */
+    public $full_payment = 0;
+
+    /**
+     * @var int 关闭订单时间
+     */
+    public $close_time = 0;
+
+    /**
+     * 营销类型
+     *
+     * @var
+     */
+    public $marketing_type;
+    public $marketing_id;
+
+    /**
+     * 再次购买订单id
+     *
+     * @var int
+     */
+    public $buy_again_id;
 
     /**
      * @return array
@@ -210,20 +323,27 @@ class PreviewForm extends Order
                     'pickup_point_freight',
                     'pickup_point_fee',
                     'pickup_point_is_open',
+                    'wholesale_product_id',
+                    'wholesale_id',
+                    'group_buy_id',
+                    'marketing_id',
+                    'subscribe_buy_id',
+                    'is_full_payment',
+                    'marketing_id',
+                    'buy_again_id',
                 ],
                 'integer',
             ],
-            [['invoice_content', 'receiver_name'], 'string'],
+            [['invoice_content', 'receiver_name', 'receiver_mobile', 'promo_code', 'marketing_type'], 'string'],
             [['coupon_money', 'shipping_money'], 'number'],
             ['type', 'in', 'range' => PreviewTypeEnum::getKeys()],
             ['shipping_type', 'in', 'range' => ShippingTypeEnum::getKeys()],
             [['use_point', 'company_id'], 'integer', 'min' => 0],
-            [['address_id'], 'required', 'on' => ['create']],
-            [['address_id'], 'addressVerify', 'on' => ['create']],
+            [['combination_num', 'combination_id'], 'integer', 'min' => 1],
             [['use_point'], 'usePointVerify', 'on' => ['create']],
             [['invoice_id'], 'invoiceVerify', 'on' => ['create']],
-            [['company_id'], 'companyVerify', 'on' => ['create']],
-            [['receiver_mobile', 'receiver_name'], 'receiverVerify', 'on' => ['create']],
+            [['shipping_type'], 'required', 'on' => ['create']],
+            [['shipping_type'], 'shippingVerify', 'on' => ['create']],
         ];
     }
 
@@ -253,6 +373,17 @@ class PreviewForm extends Order
             'data' => '数据',
             'type' => '数据类型',
             'coupon' => '优惠券',
+            'wholesale_product_id' => '拼团对应id',
+            'wholesale_id' => '拼团',
+            'group_buy_id' => '团购',
+            'combination_num' => '组合套餐数量',
+            'combination_id' => '组合套餐',
+            'subscribe_buy_id' => '预约购买',
+            'promo_code' => '推广码',
+            'is_full_payment' => '全款预订',
+            'marketing_id' => '营销ID',
+            'marketing_type' => '营销类型',
+            'buy_again_id' => '再次购买订单ID',
         ]);
     }
 
@@ -267,53 +398,6 @@ class PreviewForm extends Order
         $scenarios['create'] = ArrayHelper::merge(array_keys($this->attributeLabels()), ['address_id']);
 
         return $scenarios;
-    }
-
-    /**
-     * 地址验证
-     *
-     * @param $attribute
-     */
-    public function addressVerify($attribute)
-    {
-        if (empty($this->address)) {
-            $this->addError($attribute, '地址不存在');
-        } elseif (!empty($this->is_logistics) && !$this->company_id && empty($this->pickup_id)) {
-            $this->addError($attribute, '请选择物流公司');
-        }
-    }
-
-    /**
-     * 下单地址
-     *
-     * @param $attribute
-     */
-    public function receiverVerify($attribute)
-    {
-        if (!$this->receiver_mobile) {
-            $this->addError($attribute, '请填写手机号码');
-        }
-
-        if (!$this->receiver_name) {
-            $this->addError($attribute, '请填写姓名');
-        }
-    }
-
-    /**
-     * 物流公司验证
-     *
-     * @param $attribute
-     */
-    public function companyVerify($attribute)
-    {
-        if ($this->company_id) {
-            $company = Yii::$app->tinyShopService->expressCompany->findById($this->company_id);
-            if (!$company) {
-                $this->addError($attribute, '物流公司不存在');
-            }
-
-            $this->company_name = $company->title;
-        }
     }
 
     /**
@@ -343,6 +427,16 @@ class PreviewForm extends Order
     {
         if ($this->use_point > $this->max_use_point) {
             $this->addError($attribute, '积分不可超出最大可用额度');
+        }
+    }
+
+    /**
+     * @param $attribute
+     */
+    public function shippingVerify($attribute)
+    {
+        if ($this->close_all_logistics == true) {
+            $this->addError($attribute, '配送方式已全部被关闭，请联系客服');
         }
     }
 }

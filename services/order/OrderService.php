@@ -2,7 +2,6 @@
 
 namespace addons\TinyShop\services\order;
 
-use addons\TinyShop\common\models\product\Product;
 use Yii;
 use yii\data\Pagination;
 use yii\db\ActiveQuery;
@@ -13,6 +12,8 @@ use common\helpers\StringHelper;
 use common\helpers\EchantsHelper;
 use common\enums\StatusEnum;
 use common\enums\PayTypeEnum;
+use common\models\member\Member;
+use common\helpers\BcHelper;
 use common\models\forms\MerchantCreditsLogForm;
 use common\models\forms\CreditsLogForm;
 use addons\TinyShop\common\models\SettingForm;
@@ -25,6 +26,7 @@ use addons\TinyShop\common\enums\ExplainStatusEnum;
 use addons\TinyShop\common\enums\RefundStatusEnum;
 use addons\TinyShop\common\enums\OrderTypeEnum;
 use addons\TinyShop\common\models\forms\OrderQueryForm;
+use addons\TinyShop\common\enums\AccessTokenGroupEnum;
 
 /**
  * Class OrderService
@@ -33,6 +35,8 @@ use addons\TinyShop\common\models\forms\OrderQueryForm;
  */
 class OrderService extends \common\components\Service
 {
+    protected $_setting;
+
     /**
      * 创建订单
      *
@@ -42,28 +46,34 @@ class OrderService extends \common\components\Service
      */
     public function create(PreviewForm $previewForm)
     {
-        $config = AddonHelper::getBackendConfig();
+        $config = AddonHelper::getConfig();
         // 生成订单
+        /** @var Order $order */
         $order = new Order();
         $order = $order->loadDefaultValues();
         $order->attributes = ArrayHelper::toArray($previewForm);
+        $order->marketing_id = $previewForm->marketing_id;
+        $order->marketing_type = $previewForm->marketing_type;
         $order->order_status = OrderStatusEnum::NOT_PAY;
-        $order->order_sn = StringHelper::randomNum(date('YmdHis'), 10);
-        $order->out_trade_no = StringHelper::randomNum(time(), 10);
+        $order->out_trade_no = date('YmdHis') . StringHelper::random(10, true);
+        $order->order_sn = time() . StringHelper::random(10, true);
         $order->user_name = $previewForm->member->nickname;
         $order->buyer_ip = Yii::$app->request->userIP;
         $order->merchant_name = $config['title'] ?? '';
         $order->give_point_type = $config['shopping_back_points'] ?? 1;
+        $order->close_time = $previewForm->close_time;
+        $previewForm->final_payment_money > 0 && $order->final_payment_money = $previewForm->final_payment_money;
 
         // 收货地址
-        if ($address = $previewForm->address) {
+        if (!empty($address = $previewForm->address)) {
+            $order->setScenario('address');
             $order->receiver_mobile = $address['mobile'];
             $order->receiver_province = $address['province_id'];
             $order->receiver_city = $address['city_id'];
             $order->receiver_area = $address['area_id'];
             $order->receiver_address = $address['address_details'];
             $order->receiver_region_name = $address['address_name'];
-            $order->receiver_zip = (int)$address['zip_code'];
+            $order->receiver_zip = (string)$address['zip_code'];
             $order->receiver_name = $address['realname'];
         }
 
@@ -72,22 +82,25 @@ class OrderService extends \common\components\Service
         }
 
         // 门店自提
-        if ($order->shipping_type == ShippingTypeEnum::VISIT) {
+        if ($order->shipping_type == ShippingTypeEnum::PICKUP) {
             Yii::$app->tinyShopService->orderPickup->create($previewForm->pickup, $order);
-        }
-
-        // 发票记录
-        if (!empty($previewForm->invoice)) {
-            Yii::$app->tinyShopService->orderInvoice->create($order, $previewForm->invoice, $previewForm->invoice_content);
-            $order->invoice_id = $previewForm->invoice->id;
         }
 
         // 使用优惠券
         !empty($previewForm->coupon) && Yii::$app->tinyShopService->marketingCoupon->used($previewForm->coupon, $order->id);
         // 创建订单详情
         $this->createProduct($previewForm->orderProducts, $previewForm->sku, $order);
-
+        // 发票id
+        !empty($previewForm->invoice) && $order->invoice_id = $previewForm->invoice->id;
         $order->save();
+
+        // 发票记录
+        if (!empty($previewForm->invoice)) {
+            Yii::$app->tinyShopService->orderInvoice->create($order, $previewForm->invoice, $previewForm->invoice_content);
+        }
+
+        // 记录营销
+        !empty($previewForm->marketingDetails) && Yii::$app->tinyShopService->orderProductMarketingDetail->create($order->id, $previewForm->marketingDetails);
 
         // 记录操作
         Yii::$app->tinyShopService->orderAction->create(
@@ -95,7 +108,7 @@ class OrderService extends \common\components\Service
             $order->id,
             $order->order_status,
             $previewForm->member->id,
-            $previewForm->member->username
+            $previewForm->member->nickname
         );
 
         return $order;
@@ -125,15 +138,37 @@ class OrderService extends \common\components\Service
         $order->order_status = OrderStatusEnum::PAY;
         $order->payment_type = $paymentType;
         $order->pay_status = StatusEnum::ENABLED;
-        $order->is_new_member = $this->findIsNewMember($order->buyer_id, $order->merchant_id);
         $order->pay_time = time();
-
-        $this->givePoint($order);
 
         // 扣减库存
         $orderProduct = $order->product;
         $skuNums = ArrayHelper::map($orderProduct, 'sku_id', 'num');
         Yii::$app->tinyShopService->productSku->decrRepertory($skuNums);
+
+        return $this->paySuccess($order);
+    }
+
+    /**
+     * 真正的支付完成
+     *
+     * @param Order $order
+     * @throws UnprocessableEntityHttpException
+     * @throws \yii\web\NotFoundHttpException
+     */
+    protected function paySuccess(Order $order)
+    {
+        $this->givePoint($order);
+
+        $order->is_new_member = $this->findIsNewMember($order->buyer_id, $order->merchant_id);
+
+        // 记录操作
+        Yii::$app->tinyShopService->orderAction->create(
+            '订单支付',
+            $order->id,
+            $order->order_status,
+            $order->buyer_id,
+            $order->user_name
+        );
     }
 
     /**
@@ -164,9 +199,12 @@ class OrderService extends \common\components\Service
                 'num' => $order->point,
                 'credit_group' => 'orderClose',
                 'map_id' => $order->id,
-                'remark' => '订单关闭返回',
+                'remark' => Yii::$app->params['tinyShopName']  . '订单关闭',
             ]));
         }
+
+        // 优惠券返回
+        $order->coupon_id > 0 && Yii::$app->tinyShopService->marketingCoupon->back($order->coupon_id, $order->buyer_id);
 
         // 取消赠送
         if ($order->give_point > 0) {
@@ -181,7 +219,7 @@ class OrderService extends \common\components\Service
                     'num' => $order->give_point,
                     'credit_group' => 'orderCloseGive',
                     'map_id' => $order->id,
-                    'remark' => '订单关闭取消赠送',
+                    'remark' => Yii::$app->params['tinyShopName']  . '订单关闭取消赠送',
                 ]));
             }
         }
@@ -238,6 +276,10 @@ class OrderService extends \common\components\Service
             throw new UnprocessableEntityHttpException('订单已经被处理');
         }
 
+        if (Yii::$app->tinyShopService->orderProduct->getAfterSaleCountByOrderId($id) > 0) {
+            throw new UnprocessableEntityHttpException('请先处理或关闭订单售后');
+        }
+
         $order->order_status = OrderStatusEnum::SING;
         $order->sign_time = time();
 
@@ -271,7 +313,7 @@ class OrderService extends \common\components\Service
                     'num' => $model->give_point,
                     'credit_group' => 'orderGive',
                     'map_id' => $model->id,
-                    'remark' => '订单赠送',
+                    'remark' => Yii::$app->params['tinyShopName']  . '订单赠送',
                 ]));
             }
         }
@@ -313,68 +355,25 @@ class OrderService extends \common\components\Service
      * @throws UnprocessableEntityHttpException
      * @throws \yii\web\NotFoundHttpException
      */
-    public function closeAll($config, $merchant_id)
+    public function closeAll($merchant_id)
     {
-        $order_buy_close_time = $config['order_buy_close_time'] ?? (new SettingForm())->order_buy_close_time;
-        if ($order_buy_close_time == 0) {
-            return;
-        }
-
         $orderIds = Order::find()
             ->select('id')
             ->where(['order_status' => OrderStatusEnum::NOT_PAY])
-            ->andWhere(['<=', 'created_at', time() - $order_buy_close_time * 60])
+            ->andWhere(['<=', 'close_time', time()])
             ->andFilterWhere(['merchant_id' => $merchant_id])
             ->column();
 
         try {
             foreach ($orderIds as $id) {
                 $this->close($id);
+                // 记录操作
+                Yii::$app->tinyShopService->orderAction->create('自动关闭', $id, OrderStatusEnum::NOT_PAY, 0, '系统');
             }
         } catch (\Exception $e) {
-            p($e->getMessage());die();
-        }
-    }
-
-    /**
-     * 关闭超时的拼团订单
-     *
-     * @param $config
-     * @param $merchant_id
-     * @throws UnprocessableEntityHttpException
-     * @throws \yii\web\NotFoundHttpException
-     */
-    public function closeWholesaleAll()
-    {
-        $orders = Order::find()
-            ->select(['id', 'order_status', 'buyer_id'])
-            ->where(['in', 'wholesale_id', Yii::$app->tinyShopService->marketingWholesale->findLoseEfficacy()])
-            ->with('product')
-            ->asArray()
-            ->all();
-
-        try {
-            foreach ($orders as $order) {
-                // 未支付的关闭
-                if ($order['order_status'] == OrderStatusEnum::NOT_PAY) {
-                    $this->close($order['id']);
-                } elseif ($order['order_status'] == OrderStatusEnum::WHOLESALE && isset($order['product'][0])) { // 已支付的退款
-                    $product = $order['product'][0];
-
-                    // 退款进订单
-                    $orderProduct = Yii::$app->tinyShopService->orderProduct->refundReturnMoney($product['id']);
-                    // 退款进用户余额/原路退回
-                    Yii::$app->services->memberCreditsLog->incrMoney(new CreditsLogForm([
-                        'member' => Yii::$app->services->member->get($order['buyer_id']),
-                        'num' => $orderProduct->refund_balance_money,
-                        'credit_group' => 'orderRefundBalanceMoney',
-                        'map_id' => $orderProduct->id,
-                        'remark' => '拼团订单退款',
-                    ]));
-                }
-            }
-        } catch (\Exception $e) {
-            p($e->getMessage());die();
+            // 记录行为日志
+            Yii::$app->services->log->setErrorStatus(500, 'TinyShopCloseAll', $e->getMessage());
+            Yii::$app->services->log->push();
         }
     }
 
@@ -398,9 +397,14 @@ class OrderService extends \common\components\Service
             /** @var Order $order */
             foreach ($orders as $order) {
                 $this->finalize($order);
+
+                // 记录操作
+                Yii::$app->tinyShopService->orderAction->create('自动完成', $order['id'], OrderStatusEnum::ACCOMPLISH, 0, '系统');
             }
         } catch (\Exception $e) {
-
+            // 记录行为日志
+            Yii::$app->services->log->setErrorStatus(500, 'TinyShopFinalizeAll', $e->getMessage());
+            Yii::$app->services->log->push();
         }
     }
 
@@ -429,31 +433,51 @@ class OrderService extends \common\components\Service
         $orderProducts = Yii::$app->tinyShopService->orderProduct->findByOrderId($order_id);
 
         $count = count($orderProducts);
+        $giftCount = 0;
+        // 排除赠品
+        foreach ($orderProducts as $orderProduct) {
+            if ($orderProduct['gift_flag'] > 0) {
+                $giftCount++;
+            }
+        }
+
+        // 正常的数量
+        $normalCount = $count - $giftCount;
 
         // 退款状态数量
         $refundStatusCount = 0;
         // 已发货状态
         $shippingStatusCount = 0;
+        // 未发货状态
+        $notShippingStatusCount = 0;
         foreach ($orderProducts as $orderProduct) {
             $orderProduct['shipping_status'] == StatusEnum::ENABLED && $shippingStatusCount++;
             $orderProduct['refund_status'] == RefundStatusEnum::CONSENT && $refundStatusCount++;
-        }
-
-        // 全部已发货
-        if ($count == $shippingStatusCount) {
-            return $this->consign($order_id);
+            // 未发货的正常产品
+            if (
+                $orderProduct['shipping_status'] == StatusEnum::DISABLED &&
+                in_array($orderProduct['refund_status'], RefundStatusEnum::deliver())
+            ) {
+                $notShippingStatusCount++;
+            }
         }
 
         // 全部已退款直接关闭
-        if ($count == $refundStatusCount) {
+        if ($count === $refundStatusCount || $normalCount === $refundStatusCount) {
             return $this->close($order_id, '', true);
+        }
+
+        // 全部已发货
+        if ($count === $shippingStatusCount) {
+            return $this->consign($order_id);
         }
 
         // 校验发货状态如果其他货物已发就改变订单状态
         if (
             ($count == ($refundStatusCount + $shippingStatusCount)) &&
             ($order = $this->findById($order_id)) &&
-            $order['order_status'] == OrderStatusEnum::PAY
+            $order['order_status'] == OrderStatusEnum::PAY &&
+            $notShippingStatusCount == 0
         ) {
             return $this->consign($order_id);
         }
@@ -509,14 +533,19 @@ class OrderService extends \common\components\Service
                 'o.id',
                 'o.merchant_id',
                 'order_sn',
+                'close_time',
                 'out_trade_no',
                 'o.order_type',
                 'o.order_status',
+                'o.wholesale_id',
                 'payment_type',
                 'o.shipping_type',
                 'o.buyer_id',
                 'o.product_money',
                 'o.order_money',
+                'o.is_evaluate',
+                'o.is_virtual',
+                'final_payment_money',
                 'point',
                 'point_money',
                 'coupon_money',
@@ -540,7 +569,21 @@ class OrderService extends \common\components\Service
         } else { // -1:退款/售后
             $data = $data->with(['member'])->joinWith([
                 'product p' => function (ActiveQuery $query) {
-                    return $query->andWhere(['in', 'refund_status', RefundStatusEnum::refund()]);
+                    return $query->andWhere([
+                        'or',
+                        ['in', 'refund_status', RefundStatusEnum::refund()],
+                        ['is_customer' => StatusEnum::ENABLED]
+                    ]);
+                },
+            ]);
+        }
+
+        // 关键字查询
+        $keyword = $queryForm->keyword;
+        if (!empty($keyword)) {
+            $data = $data->with(['member'])->joinWith([
+                'product p' => function (ActiveQuery $query) use ($keyword) {
+                    return $query->andWhere(['like', 'p.product_name', $keyword]);
                 },
             ]);
         }
@@ -556,11 +599,18 @@ class OrderService extends \common\components\Service
             ->limit($pages->limit)
             ->all();
 
-        $setting = new SettingForm();
-        $setting->attributes = AddonHelper::getBackendConfig();
         foreach ($models as &$model) {
-            // 倒计时
-            $model['close_time'] = $model['created_at'] + $setting->order_buy_close_time * 60;
+            // 是否在售后流程
+            $model['is_customer'] = StatusEnum::DISABLED;
+
+            foreach ($model['product'] as $product) {
+                if ($model['is_customer'] == StatusEnum::ENABLED) {
+                    break;
+                }
+                if (in_array($product['refund_status'], RefundStatusEnum::refund())) {
+                    $model['is_customer'] = StatusEnum::ENABLED;
+                }
+            }
         }
 
         return $models;
@@ -602,6 +652,26 @@ class OrderService extends \common\components\Service
         }
 
         return $model;
+    }
+
+    /**
+     * 待评价数量
+     *
+     * @param int $limit
+     * @return array|\yii\db\ActiveRecord[]
+     */
+    public function findEvaluateData($evaluate_day, $limit = 20)
+    {
+        return Order::find()
+            ->where([
+                'order_status' => OrderStatusEnum::ACCOMPLISH,
+                'is_evaluate' => StatusEnum::DISABLED,
+                'review_status' => StatusEnum::DISABLED
+            ])
+            ->andWhere(['<=', 'finish_time', time() - 3600 * 24 * $evaluate_day])
+            ->with(['product'])
+            ->limit($limit)
+            ->all();
     }
 
     /**
@@ -857,9 +927,148 @@ class OrderService extends \common\components\Service
     }
 
     /**
+     * @param string $type
+     * @param string $count_sql
+     * @return array
+     */
+    public function getOrderCreateCountStat($type)
+    {
+        $fields = [
+            [
+                'name' => '下单数量',
+                'type' => 'bar',
+                'field' => 'count',
+            ],
+            [
+                'name' => '支付数量',
+                'type' => 'bar',
+                'field' => 'pay_count',
+            ],
+            [
+                'name' => '下单支付转化率',
+                'type' => 'line',
+                'field' => 'pay_rate',
+            ],
+        ];
+
+        // 获取时间和格式化
+        list($time, $format) = EchantsHelper::getFormatTime($type);
+        // 获取数据
+        return EchantsHelper::lineOrBarInTime(function ($start_time, $end_time, $formatting) {
+            $data = Order::find()
+                ->select([
+                    'count(id) as count',
+                    'sum(pay_status) as pay_count',
+                    "from_unixtime(created_at, '$formatting') as time"
+                ])
+                ->andWhere(['between', 'created_at', $start_time, $end_time])
+                ->groupBy(['time'])
+                ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
+                ->asArray()
+                ->all();
+
+            foreach ($data as &$datum) {
+                $datum['pay_rate'] = BcHelper::mul(BcHelper::div($datum['pay_count'], $datum['count']), 100);
+            }
+
+            return $data;
+        }, $fields, $time, $format);
+    }
+
+    /**
+     * @param string $type
+     * @param string $count_sql
+     * @return array
+     */
+    public function getBetweenProductCountAndCountStatToEchant($type)
+    {
+        $fields = [
+             'product_count' => '商品售出数',
+        ];
+
+        // 获取时间和格式化
+        list($time, $format) = EchantsHelper::getFormatTime($type);
+        // 获取数据
+        return EchantsHelper::lineOrBarInTime(function ($start_time, $end_time, $formatting) {
+            return Order::find()
+                ->select([
+                    'sum(product_count) as product_count',
+                    "from_unixtime(created_at, '$formatting') as time"
+                ])
+                ->where(['pay_status' => StatusEnum::ENABLED])
+                ->andWhere(['between', 'pay_time', $start_time, $end_time])
+                ->groupBy(['time'])
+                ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
+                ->asArray()
+                ->all();
+        }, $fields, $time, $format);
+    }
+
+    /**
+     * 订单来源统计
+     *
+     * @return array
+     */
+    public function getFormStat($type)
+    {
+        $fields = array_values(AccessTokenGroupEnum::getMap());
+
+        // 获取时间和格式化
+        list($time, $format) = EchantsHelper::getFormatTime($type);
+        // 获取数据
+        return EchantsHelper::pie(function ($start_time, $end_time) use ($fields) {
+            $data = Order::find()
+                ->select(['count(id) as value', 'order_from'])
+                ->where(['status' => StatusEnum::ENABLED])
+                ->andFilterWhere(['between', 'created_at', $start_time, $end_time])
+                ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
+                ->groupBy(['order_from'])
+                ->asArray()
+                ->all();
+
+            foreach ($data as &$datum) {
+                $datum['name'] = AccessTokenGroupEnum::getValue($datum['order_from']);
+            }
+
+            return [$data, $fields];
+        }, $time);
+    }
+
+    /**
+     * 订单类型统计
+     *
+     * @return array
+     */
+    public function getOrderTypeStat($type)
+    {
+        $fields = array_values(OrderTypeEnum::getMap());
+
+        // 获取时间和格式化
+        list($time, $format) = EchantsHelper::getFormatTime($type);
+        // 获取数据
+        return EchantsHelper::pie(function ($start_time, $end_time) use ($fields) {
+            $data = Order::find()
+                ->select(['count(id) as value', 'order_type'])
+                ->where(['status' => StatusEnum::ENABLED])
+                ->andFilterWhere(['between', 'created_at', $start_time, $end_time])
+                ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
+                ->groupBy(['order_type'])
+                ->asArray()
+                ->all();
+
+            foreach ($data as &$datum) {
+                $datum['name'] = OrderTypeEnum::getValue($datum['order_type']);
+            }
+
+            return [$data, $fields];
+        }, $time);
+    }
+
+    /**
      * 创建产品
      *
-     * @param $carts
+     * @param $orderProducts
+     * @param $sku
      * @param Order $order
      * @throws UnprocessableEntityHttpException
      */
@@ -871,6 +1080,11 @@ class OrderService extends \common\components\Service
         foreach ($orderProducts as $model) {
             // 库存判断
             if ($sku[$model['sku_id']]['stock'] < $model['num']) {
+                // 如果是赠品且库存不足跳出本次循环
+                if ($model['gift_flag'] > 0) {
+                    continue;
+                }
+
                 throw new UnprocessableEntityHttpException($model['product_name'] . ' 商品库存不足');
             }
 
@@ -882,5 +1096,19 @@ class OrderService extends \common\components\Service
                 throw new UnprocessableEntityHttpException($this->getError($model));
             }
         }
+    }
+
+    /**
+     * @return SettingForm|mixed
+     */
+    protected function getSetting()
+    {
+        if (!$this->_setting) {
+            $setting = new SettingForm();
+            $setting->attributes = AddonHelper::getConfig();
+            $this->_setting = $setting;
+        }
+
+        return $this->_setting;
     }
 }

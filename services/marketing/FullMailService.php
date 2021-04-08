@@ -16,12 +16,23 @@ use addons\TinyShop\common\models\marketing\FullMail;
 class FullMailService extends Service
 {
     /**
+     * @return array|\yii\db\ActiveRecord|null
+     */
+    public function findOne($merchant_id)
+    {
+        return FullMail::find()
+            ->where(['merchant_id' => $merchant_id])
+            ->asArray()
+            ->one();
+    }
+
+    /**
      * @return FullMail
      */
-    public function one()
+    public function one($merchant_id)
     {
         /* @var $model FullMail */
-        if (empty(($model = FullMail::find()->where(['merchant_id' => Yii::$app->services->merchant->getId()])->one()))) {
+        if (empty(($model = FullMail::find()->where(['merchant_id' => $merchant_id])->one()))) {
             $model = new FullMail();
 
             return $model->loadDefaultValues();
@@ -35,7 +46,7 @@ class FullMailService extends Service
      *
      * @param $product_money
      * @param $address
-     * @return bool
+     * @return FullMail|bool
      */
     public function postage($product_money, $address)
     {
@@ -43,13 +54,13 @@ class FullMailService extends Service
             return false;
         }
 
-        $fullMail = $this->one();
+        $fullMail = $this->one($address->merchant_id);
         if (
             $fullMail['is_open'] == StatusEnum::ENABLED &&
             $product_money >= $fullMail['full_mail_money'] &&
-            in_array($address['city_id'], StringHelper::parseAttr($fullMail['no_mail_city_ids']))
+            !in_array($address['city_id'], StringHelper::parseAttr($fullMail['no_mail_city_ids']))
         ) {
-            return true;
+            return $fullMail;
         }
 
         return false;

@@ -2,7 +2,10 @@
 
 namespace addons\TinyShop\services\order;
 
+use addons\TinyShop\common\enums\SubscriptionActionEnum;
 use Yii;
+use yii\db\ActiveQuery;
+use yii\helpers\Json;
 use yii\web\UnprocessableEntityHttpException;
 use common\components\Service;
 use common\enums\StatusEnum;
@@ -33,11 +36,14 @@ class ProductService extends Service
      * @return Customer|void
      * @throws UnprocessableEntityHttpException
      */
-    public function refundApply(RefundForm $refundForm, $member_id)
+    public function refundApply(RefundForm $refundForm, $member_id, $nickname)
     {
         $model = $this->findByIdAndVerify($refundForm->id, $member_id);
         $model->refund_type = $refundForm->refund_type;
         $model->refund_reason = $refundForm->refund_reason;
+        $model->refund_evidence = is_array($refundForm->refund_evidence) ? $refundForm->refund_evidence : Json::decode($refundForm->refund_evidence);
+        $model->refund_require_money = $refundForm->refund_require_money;
+        $model->refund_explain = $refundForm->refund_explain;
 
         // 待发货、已发货
         if (!in_array($model->order_status, [OrderStatusEnum::PAY, OrderStatusEnum::SHIPMENTS])) {
@@ -45,7 +51,11 @@ class ProductService extends Service
         }
 
         // 未发货只能选择只退款
-        if ($model->order_status == OrderStatusEnum::PAY && $model->refund_type != RefundTypeEnum::MONEY) {
+        if (
+            $model->order_status == OrderStatusEnum::PAY &&
+            $model->refund_type != RefundTypeEnum::MONEY &&
+            $model->shipping_status == StatusEnum::DISABLED
+        ) {
             throw new UnprocessableEntityHttpException('只可选择仅退款');
         }
 
@@ -61,6 +71,16 @@ class ProductService extends Service
         if (!$model->save()) {
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->id,
+            $model->refund_status,
+            $member_id,
+            $nickname
+        );
     }
 
     /**
@@ -83,6 +103,16 @@ class ProductService extends Service
         if (!$model->save()) {
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->id,
+            $model->refund_status,
+            Yii::$app->user->identity->id,
+            Yii::$app->user->identity->username
+        );
 
         return $model;
     }
@@ -108,6 +138,16 @@ class ProductService extends Service
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
 
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->id,
+            $model->refund_status,
+            Yii::$app->user->identity->id,
+            Yii::$app->user->identity->username
+        );
+
         return $model;
     }
 
@@ -118,7 +158,7 @@ class ProductService extends Service
      * @param $member_id
      * @throws UnprocessableEntityHttpException
      */
-    public function refundSalesReturn(RefundForm $refundForm, $member_id)
+    public function refundSalesReturn(RefundForm $refundForm, $member_id, $nickname)
     {
         $model = $this->findByIdAndVerify($refundForm->id, $member_id);
         $model->refund_shipping_code = $refundForm->refund_shipping_code;
@@ -140,6 +180,16 @@ class ProductService extends Service
         if (!$model->save()) {
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->id,
+            $model->refund_status,
+            $member_id,
+            $nickname
+        );
     }
 
     /**
@@ -149,7 +199,7 @@ class ProductService extends Service
      * @param $member_id
      * @throws UnprocessableEntityHttpException
      */
-    public function refundClose($id, $member_id)
+    public function refundClose($id, $member_id, $nickname)
     {
         $model = $this->findByIdAndVerify($id, $member_id);
 
@@ -165,6 +215,16 @@ class ProductService extends Service
         if (!$model->save()) {
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->id,
+            $model->refund_status,
+            $member_id,
+            $nickname
+        );
     }
 
     /**
@@ -175,7 +235,7 @@ class ProductService extends Service
      * @throws UnprocessableEntityHttpException
      * @throws \yii\web\NotFoundHttpException
      */
-    public function refundReturnMoney($id)
+    public function refundReturnMoney($id, $refund_balance_money)
     {
         /** @var OrderProduct $model */
         $model = $this->findByIdAndVerify($id);
@@ -183,25 +243,31 @@ class ProductService extends Service
         $order = $model->order;
 
         // 实际退款金额
-        $model->refund_balance_money = $this->getRefundBalanceMoney($order, $model);
-
-        // 退款确认(排除拼团已支付)
-        if ($order->order_status != OrderStatusEnum::WHOLESALE) {
-            if ($model->refund_status != RefundStatusEnum::AFFIRM_RETURN_MONEY) {
-                throw new UnprocessableEntityHttpException('操作失败,用户已关闭或已处理');
-            }
-        }
+        $model->refund_balance_money = $refund_balance_money;
 
         $model->refund_status = RefundStatusEnum::CONSENT;
         if (!$model->save()) {
             throw new UnprocessableEntityHttpException($this->getError($model));
         }
 
-        // 增加本身订单退款金额
-        Order::updateAllCounters(['refund_balance_money' => $model->refund_balance_money], ['id' => $order->id]);
+        // 退款为 0
+        if ($model->refund_balance_money > 0) {
+            // 增加本身订单退款金额
+            Order::updateAllCounters(['refund_balance_money' => $model->refund_balance_money], ['id' => $order->id]);
+        }
 
         // 自动更新订单状态
         Yii::$app->tinyShopService->order->autoUpdateStatus($model['order_id']);
+
+        // 记录行为
+        Yii::$app->tinyShopService->orderRefund->create(
+            Yii::$app->id,
+            $model->order_id,
+            $model->id,
+            $model->refund_status,
+            Yii::$app->user->identity->id,
+            Yii::$app->user->identity->username
+        );
 
         return $model;
     }
@@ -240,7 +306,7 @@ class ProductService extends Service
     {
         $model = OrderProduct::find()
             ->where(['id' => $id, 'status' => StatusEnum::ENABLED])
-            ->andFilterWhere(['buyer_id' => $member_id])
+            ->andFilterWhere(['member_id' => $member_id])
             ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
             ->one();
 
@@ -248,7 +314,7 @@ class ProductService extends Service
             throw new UnprocessableEntityHttpException('订单产品不存在');
         }
 
-        if ($member_id && $member_id != $model['buyer_id']) {
+        if ($member_id && $member_id != $model['member_id']) {
             throw new UnprocessableEntityHttpException('权限不足');
         }
 
@@ -319,13 +385,49 @@ class ProductService extends Service
      * @param string $member_id
      * @return false|string|null
      */
-    public function getAfterSaleCount($member_id = '')
+    public function getAfterSaleCount($member_id)
     {
         return OrderProduct::find()
             ->select(['count(distinct order_id) as count'])
             ->where(['status' => StatusEnum::ENABLED])
             ->andFilterWhere(['member_id' => $member_id])
             ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
+            ->andWhere([
+                'or',
+                ['in', 'refund_status', RefundStatusEnum::refund()],
+                ['is_customer' => StatusEnum::ENABLED]
+            ])
+            ->scalar();
+    }
+
+    /**
+     * 获取后台售后数量
+     *
+     * @param string $member_id
+     * @return false|string|null
+     */
+    public function getAfterSaleCountByBackend()
+    {
+        return OrderProduct::find()
+            ->select(['count(distinct order_id) as count'])
+            ->where(['in', 'refund_status', RefundStatusEnum::refund()])
+            ->andWhere(['status' => StatusEnum::ENABLED])
+            ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
+            ->scalar();
+    }
+
+    /**
+     * 获取订单售后数量
+     *
+     * @param $order_id
+     * @return false|string|null
+     */
+    public function getAfterSaleCountByOrderId($order_id)
+    {
+        return OrderProduct::find()
+            ->select(['count(id) as count'])
+            ->where(['status' => StatusEnum::ENABLED])
+            ->andWhere(['order_id' => $order_id])
             ->andWhere(['in', 'refund_status', RefundStatusEnum::refund()])
             ->scalar();
     }
@@ -422,6 +524,19 @@ class ProductService extends Service
     }
 
     /**
+     * @param $order_id
+     * @return array|\yii\db\ActiveRecord[]
+     */
+    public function findByOrderIdWithVirtualType($order_id)
+    {
+        return OrderProduct::find()
+            ->where(['order_id' => $order_id])
+            ->with('virtualType')
+            ->asArray()
+            ->all();
+    }
+
+    /**
      * 获取指定时间内的产品出售数量和金额
      *
      * @param $models
@@ -472,7 +587,7 @@ class ProductService extends Service
                 ->andFilterWhere(['merchant_id' => $this->getMerchantId()])
                 ->groupBy(['product_id'])
                 ->with('product')
-                ->orderBy("count desc")
+                ->orderBy("count asc")
                 ->limit($num)
                 ->asArray()
                 ->all();

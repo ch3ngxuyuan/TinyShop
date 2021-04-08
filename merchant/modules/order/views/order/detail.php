@@ -67,7 +67,9 @@ $this->params['breadcrumbs'][] = $this->title;
                     </tr>
                     <tr>
                         <th>买家：</th>
-                        <td><span><?= $model->user_name; ?></span></td>
+                        <td>
+                            <span class="blue member-view pointer" data-href="<?= Url::to(['/member/view', 'member_id' => $model->buyer_id]); ?>"><?= Html::encode($model->user_name); ?></span>
+                        </td>
                     </tr>
                     <tr>
                         <th>买家IP：</th>
@@ -83,7 +85,7 @@ $this->params['breadcrumbs'][] = $this->title;
                         <td><?= ShippingTypeEnum::getValue($model['shipping_type']) ?>  <?= $model['company_name'] ?></td>
                     </tr>
                     <!-- 物流配送 -->
-                    <?php if (in_array($model['shipping_type'], [ShippingTypeEnum::MERCHANT, ShippingTypeEnum::LOCAL_DISTRIBUTION])) { ?>
+                    <?php if (in_array($model['shipping_type'], [ShippingTypeEnum::LOGISTICS, ShippingTypeEnum::CASH_AGAINST])) { ?>
                         <tr>
                             <th>配送时间：</th>
                             <td>工作日、双休日与节假日均可送货</td>
@@ -93,12 +95,12 @@ $this->params['breadcrumbs'][] = $this->title;
                             <th>收货信息：</th>
                             <td>
                                 <?= $model->receiver_name; ?>，<?= $model->receiver_mobile; ?>
-                                ，<?= $model->receiver_region_name; ?> <?= $model->receiver_address; ?>
+                                ，<?= $model->receiver_region_name; ?> <?= Html::encode($model->receiver_address); ?>
                             </td>
                         </tr>
                     <?php } ?>
                     <!-- 自提 -->
-                    <?php if (ShippingTypeEnum::VISIT == $model['shipping_type']) { ?>
+                    <?php if (ShippingTypeEnum::PICKUP == $model['shipping_type']) { ?>
                         <tr>
                             <th>自提地点：</th>
                             <td>
@@ -115,20 +117,24 @@ $this->params['breadcrumbs'][] = $this->title;
                     <?php if (!empty($model->invoice)) { ?>
                         <tr>
                             <th>发票抬头：</th>
-                            <td><span><?= $model->invoice->title; ?></span></td>
+                            <td><span><?= Html::encode($model->invoice->title); ?></span></td>
                         </tr>
                         <tr>
                             <th>发票税号：</th>
-                            <td><span><?= $model->invoice->duty_paragraph; ?></span></td>
+                            <td><span><?= Html::encode($model->invoice->duty_paragraph); ?></span></td>
                         </tr>
                         <tr>
                             <th>发票内容：</th>
-                            <td><span><?= $model->invoice->content; ?></span></td>
+                            <td><span><?= Html::encode($model->invoice->content); ?></span></td>
                         </tr>
                     <?php } ?>
                     <tr>
                         <th>买家留言：</th>
-                        <td><?= !empty($model->buyer_message) ? $model->buyer_message : '此订单没有留言'; ?></td>
+                        <td><?= !empty($model->buyer_message) ? Html::encode($model->buyer_message) : '此订单没有留言'; ?></td>
+                    </tr>
+                    <tr>
+                        <th>卖家留言：</th>
+                        <td><?= !empty($model->seller_memo) ? Html::encode($model->seller_memo) : '此订单没有留言'; ?></td>
                     </tr>
                     </tbody>
                 </table>
@@ -170,7 +176,8 @@ $this->params['breadcrumbs'][] = $this->title;
                         <tr>
                             <th>商品图</th>
                             <th>商品</th>
-                            <th>单价(元)</th>
+                            <th>商品原价(元)</th>
+                            <th>参考单价(元)</th>
                             <th>数量</th>
                             <th>调整金额(元)</th>
                             <th>小计金额(元)</th>
@@ -188,10 +195,11 @@ $this->params['breadcrumbs'][] = $this->title;
                                     <br>
                                     <small style="color: #999"><?= $detail['sku_name']; ?></small>
                                 </td>
-                                <td><?= Yii::$app->formatter->asDecimal($detail['price'], 2); ?></td>
+                                <td><?= $detail['product_original_money']; ?></td>
+                                <td><?= $detail['price']; ?></td>
                                 <td><?= $detail['num']; ?></td>
-                                <td><?= Yii::$app->formatter->asDecimal($detail['adjust_money'], 2); ?></td>
-                                <td><?= Yii::$app->formatter->asDecimal($detail['product_money'], 2); ?></td>
+                                <td><?= $detail['adjust_money']; ?></td>
+                                <td><?= $detail['product_money']; ?></td>
                                 <td>
                                     待发货 <br>
                                     <?= OrderHelper::refundOperation($detail['id'], $detail['refund_status'])?>
@@ -217,7 +225,8 @@ $this->params['breadcrumbs'][] = $this->title;
                             <tr>
                                 <th>商品图</th>
                                 <th>商品</th>
-                                <th>单价(元)</th>
+                                <th>商品原价(元)</th>
+                                <th>参考单价(元)</th>
                                 <th>数量</th>
                                 <th>调整金额(元)</th>
                                 <th>小计金额(元)</th>
@@ -226,7 +235,7 @@ $this->params['breadcrumbs'][] = $this->title;
                             </thead>
                             <tbody>
                             <tr>
-                                <td colspan="7">
+                                <td colspan="8">
                                     <?php if ($express['shipping_type'] == StatusEnum::ENABLED) { ?>
                                         包裹 + <?= $key + 1 ?>;
                                         物流公司： <?= $express['express_company'] ?>;
@@ -238,6 +247,14 @@ $this->params['breadcrumbs'][] = $this->title;
                                                     'data-toggle' => 'modal',
                                                     'data-target' => '#ajaxModalLg',
                                                 ]) ?>
+                                        </span>
+                                        <span class="m-l">
+                                             <?= Html::a('查看物流状态',
+                                                 ['product-express/company', 'id' => $express['id']], [
+                                                     'class' => 'cyan',
+                                                     'data-toggle' => 'modal',
+                                                     'data-target' => '#ajaxModalLg',
+                                                 ]) ?>
                                         </span>
                                     <?php } else { ?>
                                         无需物流
@@ -254,10 +271,11 @@ $this->params['breadcrumbs'][] = $this->title;
                                         <br>
                                         <small style="color: #999"><?= $detail['sku_name']; ?></small>
                                     </td>
-                                    <td><?= Yii::$app->formatter->asDecimal($detail['price'], 2); ?></td>
+                                    <td><?= $detail['product_original_money']; ?></td>
+                                    <td><?= $detail['price']; ?></td>
                                     <td><?= $detail['num']; ?></td>
-                                    <td><?= Yii::$app->formatter->asDecimal($detail['adjust_money'], 2); ?></td>
-                                    <td><?= Yii::$app->formatter->asDecimal($detail['product_money'], 2); ?></td>
+                                    <td><?= $detail['adjust_money']; ?></td>
+                                    <td><?= $detail['product_money']; ?></td>
                                     <td>
                                         已发货 <br>
                                         <?= OrderHelper::refundOperation($detail['id'], $detail['refund_status'])?>
@@ -278,13 +296,17 @@ $this->params['breadcrumbs'][] = $this->title;
         <div class="box">
             <div class="box-body">
                 <div class="pull-right">
-                    商品总金额：<?= Yii::$app->formatter->asDecimal($model['product_money'], 2) ?>，
-                    代金券：￥-<?= $model['coupon_money'] ?>，
-                    余额支付：￥-<?= Yii::$app->formatter->asDecimal($model['user_money'], 2) ?>，
-                    发票税额：￥<?= $model['tax_money'] ?>，
-                    积分抵扣：￥ -<?= $model['point_money'] ?>，
-                    实际需支付：<b class="red">￥<?= Yii::$app->formatter->asDecimal($model['pay_money'], 2) ?></b> （含运费
-                    ￥<?= Yii::$app->formatter->asDecimal($model['shipping_money'], 2) ?>）
+                    商品总金额：<?= $model['product_original_money'] ?>，
+                    <?php foreach ($marketingDetails as $marketingDetail) { ?>
+                        <?php if ($marketingDetail['discount_money'] > 0) {?>
+                            <?= $marketingDetail['marketing_name'] ?>：￥-<?= $marketingDetail['discount_money'] ?>，
+                        <?php } ?>
+                    <?php } ?>
+                    <?php if ($model['user_money'] > 0) {?>余额支付：￥-<?= $model['user_money'] ?>，<?php } ?>
+                    <?php if ($model['tax_money'] > 0) {?>发票税额：￥<?= $model['tax_money'] ?>，<?php } ?>
+                    <?php if ($model['point'] > 0) {?>使用积分：<?= $model['point'] ?>，<?php } ?>
+                    实际需支付：<b class="red">￥<?= $model['pay_money'] ?></b> （含运费
+                    ￥<?= $model['shipping_money'] ?>）
                 </div>
             </div>
         </div>
@@ -322,6 +344,7 @@ $this->params['breadcrumbs'][] = $this->title;
     var orderProductAgreeUrl = "<?= Url::to(['product/refund-pass']); ?>";
     var orderProductRefuseUrl = "<?= Url::to(['product/refund-no-pass']); ?>";
     var orderProductDeliveryUrl = "<?= Url::to(['product/refund-delivery']); ?>";
+    var orderStockUpAccomplishUrl = "<?= Url::to(['stock-up-accomplish']); ?>";
     var orderDeliveryUrl = "<?= Url::to(['take-delivery']); ?>";
     var orderCloseUrl = "<?= Url::to(['close']); ?>";
 </script>
